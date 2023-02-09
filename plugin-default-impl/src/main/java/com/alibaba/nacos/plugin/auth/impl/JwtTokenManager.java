@@ -16,11 +16,16 @@
 
 package com.alibaba.nacos.plugin.auth.impl;
 
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
-import io.jsonwebtoken.security.Keys;
-import org.springframework.beans.factory.annotation.Autowired;
+import com.alibaba.nacos.common.event.ServerConfigChangeEvent;
+import com.alibaba.nacos.common.notify.Event;
+import com.alibaba.nacos.common.notify.NotifyCenter;
+import com.alibaba.nacos.common.notify.listener.Subscriber;
+import com.alibaba.nacos.common.utils.StringUtils;
+import com.alibaba.nacos.plugin.auth.exception.AccessException;
+import com.alibaba.nacos.plugin.auth.impl.constant.AuthConstants;
+import com.alibaba.nacos.plugin.auth.impl.jwt.NacosJwtParser;
+import com.alibaba.nacos.plugin.auth.impl.users.NacosUser;
+import com.alibaba.nacos.sys.env.EnvUtil;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
@@ -28,7 +33,6 @@ import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.stereotype.Component;
 
-import java.util.Date;
 import java.util.List;
 
 /**
@@ -38,12 +42,38 @@ import java.util.List;
  * @author nkorange
  */
 @Component
-public class JwtTokenManager {
+public class JwtTokenManager extends Subscriber<ServerConfigChangeEvent> {
     
+    @Deprecated
     private static final String AUTHORITIES_KEY = "auth";
     
-    @Autowired
-    private NacosAuthConfig nacosAuthConfig;
+    /**
+     * Token validity time(seconds).
+     */
+    private volatile long tokenValidityInSeconds;
+    
+    private volatile NacosJwtParser jwtParser;
+    
+    public JwtTokenManager() {
+        NotifyCenter.registerSubscriber(this);
+        processProperties();
+    }
+    
+    private void processProperties() {
+        this.tokenValidityInSeconds = EnvUtil.getProperty(AuthConstants.TOKEN_EXPIRE_SECONDS, Long.class,
+                AuthConstants.DEFAULT_TOKEN_EXPIRE_SECONDS);
+        
+        String encodedSecretKey = EnvUtil.getProperty(AuthConstants.TOKEN_SECRET_KEY,
+                AuthConstants.DEFAULT_TOKEN_SECRET_KEY);
+        try {
+            this.jwtParser = new NacosJwtParser(encodedSecretKey);
+        } catch (Exception e) {
+            throw new IllegalArgumentException(
+                    "the length of secret key must great than or equal 32 bytes; And the secret key  must be encoded by base64",
+                    e);
+        }
+        
+    }
     
     /**
      * Create token.
@@ -51,6 +81,7 @@ public class JwtTokenManager {
      * @param authentication auth info
      * @return token
      */
+    @Deprecated
     public String createToken(Authentication authentication) {
         return createToken(authentication.getName());
     }
@@ -62,16 +93,7 @@ public class JwtTokenManager {
      * @return token
      */
     public String createToken(String userName) {
-        
-        long now = System.currentTimeMillis();
-        
-        Date validity;
-        
-        validity = new Date(now + nacosAuthConfig.getTokenValidityInSeconds() * 1000L);
-        
-        Claims claims = Jwts.claims().setSubject(userName);
-        return Jwts.builder().setClaims(claims).setExpiration(validity)
-                .signWith(Keys.hmacShaKeyFor(nacosAuthConfig.getSecretKeyBytes()), SignatureAlgorithm.HS256).compact();
+        return jwtParser.jwtBuilder().setUserName(userName).setExpiredTime(this.tokenValidityInSeconds).compact();
     }
     
     /**
@@ -80,14 +102,13 @@ public class JwtTokenManager {
      * @param token token
      * @return auth info
      */
-    public Authentication getAuthentication(String token) {
-        Claims claims = Jwts.parserBuilder().setSigningKey(nacosAuthConfig.getSecretKeyBytes()).build()
-                .parseClaimsJws(token).getBody();
+    @Deprecated
+    public Authentication getAuthentication(String token) throws AccessException {
+        NacosUser nacosUser = jwtParser.parse(token);
         
-        List<GrantedAuthority> authorities = AuthorityUtils
-                .commaSeparatedStringToAuthorityList((String) claims.get(AUTHORITIES_KEY));
+        List<GrantedAuthority> authorities = AuthorityUtils.commaSeparatedStringToAuthorityList(StringUtils.EMPTY);
         
-        User principal = new User(claims.getSubject(), "", authorities);
+        User principal = new User(nacosUser.getUserName(), "", authorities);
         return new UsernamePasswordAuthenticationToken(principal, "", authorities);
     }
     
@@ -96,8 +117,25 @@ public class JwtTokenManager {
      *
      * @param token token
      */
-    public void validateToken(String token) {
-        Jwts.parserBuilder().setSigningKey(nacosAuthConfig.getSecretKeyBytes()).build().parseClaimsJws(token);
+    public void validateToken(String token) throws AccessException {
+        parseToken(token);
     }
     
+    public NacosUser parseToken(String token) throws AccessException {
+        return jwtParser.parse(token);
+    }
+    
+    public long getTokenValidityInSeconds() {
+        return tokenValidityInSeconds;
+    }
+    
+    @Override
+    public void onEvent(ServerConfigChangeEvent event) {
+        processProperties();
+    }
+    
+    @Override
+    public Class<? extends Event> subscribeType() {
+        return ServerConfigChangeEvent.class;
+    }
 }

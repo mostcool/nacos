@@ -27,7 +27,7 @@
     <packaging>jar</packaging>
     
     <name>nacos-address ${project.version}</name>
-    <url>http://nacos.io</url>
+    <url>https://nacos.io</url>
     
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -45,6 +45,11 @@
                     <artifactId>nacos-cmdb</artifactId>
                 </exclusion>
             </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
     

@@ -16,6 +16,8 @@
 
 package com.alibaba.nacos.plugin.auth.impl;
 
+import com.alibaba.nacos.plugin.auth.impl.authenticate.IAuthenticationManager;
+import com.alibaba.nacos.plugin.auth.impl.authenticate.LdapAuthenticationManager;
 import com.alibaba.nacos.plugin.auth.impl.configuration.ConditionOnLdapAuth;
 import com.alibaba.nacos.plugin.auth.impl.constant.AuthConstants;
 import com.alibaba.nacos.plugin.auth.impl.roles.NacosRoleServiceImpl;
@@ -29,14 +31,12 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.ldap.core.LdapTemplate;
 import org.springframework.ldap.core.support.LdapContextSource;
 
-import java.util.HashMap;
-import java.util.Map;
-
 /**
  * ldap auth config.
+ *
  * @author onewe
  */
-@Configuration
+@Configuration(proxyBeanMethods = false)
 @EnableAutoConfiguration(exclude = LdapAutoConfiguration.class)
 public class LdapAuthConfig {
     
@@ -52,32 +52,41 @@ public class LdapAuthConfig {
     @Value(("${" + AuthConstants.NACOS_CORE_AUTH_LDAP_USERDN + ":cn=admin,dc=example,dc=org}"))
     private String userDn;
     
-    @Value(("${ " + AuthConstants.NACOS_CORE_AUTH_LDAP_PASSWORD + ":password}"))
+    @Value(("${" + AuthConstants.NACOS_CORE_AUTH_LDAP_PASSWORD + ":password}"))
     private String password;
+    
+    @Value(("${" + AuthConstants.NACOS_CORE_AUTH_LDAP_FILTER_PREFIX + ":uid}"))
+    private String filterPrefix;
+    
+    @Value(("${" + AuthConstants.NACOS_CORE_AUTH_CASE_SENSITIVE + ":true}"))
+    private boolean caseSensitive;
     
     @Bean
     @Conditional(ConditionOnLdapAuth.class)
-    public LdapTemplate ldapTemplate() {
-        LdapContextSource contextSource = new LdapContextSource();
-        final Map<String, Object> config = new HashMap<>(16);
-        contextSource.setUrl(ldapUrl);
-        contextSource.setBase(ldapBaseDc);
-        contextSource.setUserDn(userDn);
-        contextSource.setPassword(password);
-        config.put("java.naming.ldap.attributes.binary", "objectGUID");
-        config.put("com.sun.jndi.ldap.connect.timeout", ldapTimeOut);
-        contextSource.setPooled(true);
-        contextSource.setBaseEnvironmentProperties(config);
-        contextSource.afterPropertiesSet();
-        return new LdapTemplate(contextSource);
-        
+    public LdapTemplate ldapTemplate(LdapContextSource ldapContextSource) {
+        return new LdapTemplate(ldapContextSource);
+    }
+    
+    @Bean
+    public LdapContextSource ldapContextSource() {
+        return new NacosLdapContextSource(ldapUrl, ldapBaseDc, userDn, password, ldapTimeOut);
     }
     
     @Bean
     @Conditional(ConditionOnLdapAuth.class)
     public LdapAuthenticationProvider ldapAuthenticationProvider(LdapTemplate ldapTemplate,
             NacosUserDetailsServiceImpl userDetailsService, NacosRoleServiceImpl nacosRoleService) {
-        return new LdapAuthenticationProvider(ldapTemplate, userDetailsService, nacosRoleService);
+        return new LdapAuthenticationProvider(ldapTemplate, userDetailsService, nacosRoleService, filterPrefix,
+                caseSensitive);
+    }
+    
+    @Bean
+    @Conditional(ConditionOnLdapAuth.class)
+    public IAuthenticationManager ldapAuthenticatoinManager(LdapTemplate ldapTemplate,
+            NacosUserDetailsServiceImpl userDetailsService, JwtTokenManager jwtTokenManager,
+            NacosRoleServiceImpl roleService) {
+        return new LdapAuthenticationManager(ldapTemplate, userDetailsService, jwtTokenManager, roleService,
+                filterPrefix, caseSensitive);
     }
     
 }

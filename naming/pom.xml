@@ -31,7 +31,7 @@
     <packaging>jar</packaging>
     
     <name>nacos-naming ${project.version}</name>
-    <url>http://nacos.io</url>
+    <url>https://nacos.io</url>
     
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -48,11 +48,6 @@
         <dependency>
             <groupId>${project.groupId}</groupId>
             <artifactId>nacos-api</artifactId>
-        </dependency>
-        
-        <dependency>
-            <groupId>io.netty</groupId>
-            <artifactId>netty-all</artifactId>
         </dependency>
         
         <dependency>
@@ -92,10 +87,6 @@
             <artifactId>logback-core</artifactId>
         </dependency>
         
-        <dependency>
-            <groupId>org.apache.mina</groupId>
-            <artifactId>mina-core</artifactId>
-        </dependency>
         <dependency>
             <groupId>org.javatuples</groupId>
             <artifactId>javatuples</artifactId>

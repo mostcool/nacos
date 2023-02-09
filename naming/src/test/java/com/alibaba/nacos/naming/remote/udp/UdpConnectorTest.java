@@ -20,6 +20,7 @@ package com.alibaba.nacos.naming.remote.udp;
 import com.alibaba.nacos.api.exception.NacosException;
 import com.alibaba.nacos.api.remote.PushCallBack;
 import com.alibaba.nacos.sys.env.EnvUtil;
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -75,10 +76,16 @@ public class UdpConnectorTest {
         DatagramSocket oldSocket = (DatagramSocket) ReflectionTestUtils.getField(udpConnector, "udpSocket");
         ReflectionTestUtils.setField(udpConnector, "udpSocket", udpSocket);
         doAnswer(invocationOnMock -> {
-            TimeUnit.MINUTES.sleep(1);
+            TimeUnit.SECONDS.sleep(3);
             return null;
         }).when(udpSocket).receive(any(DatagramPacket.class));
         oldSocket.close();
+        TimeUnit.SECONDS.sleep(1);
+    }
+    
+    @After
+    public void tearDown() throws InterruptedException {
+        udpConnector.shutdown();
         TimeUnit.SECONDS.sleep(1);
     }
     

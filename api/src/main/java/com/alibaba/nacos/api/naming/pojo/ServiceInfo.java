@@ -24,7 +24,6 @@ import com.fasterxml.jackson.annotation.JsonInclude.Include;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 
 /**
@@ -55,7 +54,7 @@ public class ServiceInfo {
     
     private long cacheMillis = 1000L;
     
-    private List<Instance> hosts = new ArrayList<Instance>();
+    private List<Instance> hosts = new ArrayList<>();
     
     private long lastRefTime = 0L;
     
@@ -77,7 +76,7 @@ public class ServiceInfo {
     }
     
     /**
-     * There is only one form of the key:groupName@@name@clusters. This constuctor used by DiskCache.read(String) and
+     * There is only one form of the key:groupName@@name@clusters. This constructor used by DiskCache.read(String) and
      * FailoverReactor.FailoverFileReader,you should know that 'groupName' must not be null,and 'clusters' can be null.
      */
     public ServiceInfo(String key) {
@@ -96,7 +95,7 @@ public class ServiceInfo {
             this.name = keys[serviceNameIndex];
         } else {
             //defensive programming
-            throw new IllegalArgumentException("Cann't parse out 'groupName',but it must not be null!");
+            throw new IllegalArgumentException("Can't parse out 'groupName',but it must not be null!");
         }
     }
     
@@ -126,7 +125,7 @@ public class ServiceInfo {
     }
     
     public List<Instance> getHosts() {
-        return new ArrayList<Instance>(hosts);
+        return new ArrayList<>(hosts);
     }
     
     public boolean isValid() {
@@ -187,7 +186,7 @@ public class ServiceInfo {
             return false;
         }
         
-        List<Instance> validHosts = new ArrayList<Instance>();
+        List<Instance> validHosts = new ArrayList<>();
         for (Instance host : hosts) {
             if (!host.isHealthy()) {
                 continue;
@@ -231,8 +230,7 @@ public class ServiceInfo {
         String serviceName = getGroupedServiceName();
         try {
             serviceName = URLEncoder.encode(serviceName, DEFAULT_CHARSET);
-        } catch (UnsupportedEncodingException e) {
-            //do nothing
+        } catch (UnsupportedEncodingException ignored) {
         }
         return getKey(serviceName, clusters);
     }
@@ -281,14 +279,6 @@ public class ServiceInfo {
     
     private static boolean isEmpty(String str) {
         return str == null || str.length() == 0;
-    }
-    
-    private static boolean isEmpty(Collection coll) {
-        return (coll == null || coll.isEmpty());
-    }
-    
-    private static boolean strEquals(String str1, String str2) {
-        return str1 == null ? str2 == null : str1.equals(str2);
     }
     
     public boolean isReachProtectionThreshold() {

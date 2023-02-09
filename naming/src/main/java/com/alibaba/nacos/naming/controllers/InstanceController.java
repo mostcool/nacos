@@ -22,16 +22,18 @@ import com.alibaba.nacos.api.naming.CommonParams;
 import com.alibaba.nacos.api.naming.pojo.Instance;
 import com.alibaba.nacos.api.naming.utils.NamingUtils;
 import com.alibaba.nacos.auth.annotation.Secured;
+import com.alibaba.nacos.common.notify.NotifyCenter;
 import com.alibaba.nacos.common.spi.NacosServiceLoader;
+import com.alibaba.nacos.common.trace.DeregisterInstanceReason;
+import com.alibaba.nacos.common.trace.event.naming.DeregisterInstanceTraceEvent;
+import com.alibaba.nacos.common.trace.event.naming.RegisterInstanceTraceEvent;
 import com.alibaba.nacos.common.utils.ConvertUtils;
 import com.alibaba.nacos.common.utils.JacksonUtils;
 import com.alibaba.nacos.common.utils.StringUtils;
 import com.alibaba.nacos.core.utils.WebUtils;
 import com.alibaba.nacos.naming.core.InstanceOperator;
 import com.alibaba.nacos.naming.core.InstanceOperatorClientImpl;
-import com.alibaba.nacos.naming.core.InstanceOperatorServiceImpl;
 import com.alibaba.nacos.naming.core.InstancePatchObject;
-import com.alibaba.nacos.naming.core.v2.upgrade.UpgradeJudgement;
 import com.alibaba.nacos.naming.healthcheck.RsInfo;
 import com.alibaba.nacos.naming.misc.Loggers;
 import com.alibaba.nacos.naming.misc.SwitchDomain;
@@ -81,12 +83,6 @@ public class InstanceController {
     @Autowired
     private InstanceOperatorClientImpl instanceServiceV2;
     
-    @Autowired
-    private InstanceOperatorServiceImpl instanceServiceV1;
-    
-    @Autowired
-    private UpgradeJudgement upgradeJudgement;
-
     private static final String METADATA = "metadata";
     
     public InstanceController() {
@@ -115,6 +111,9 @@ public class InstanceController {
                 .setDefaultInstanceEphemeral(switchDomain.isDefaultInstanceEphemeral()).setRequest(request).build();
         
         getInstanceOperator().registerInstance(namespaceId, serviceName, instance);
+        NotifyCenter.publishEvent(new RegisterInstanceTraceEvent(System.currentTimeMillis(), "", false, namespaceId,
+                NamingUtils.getGroupName(serviceName), NamingUtils.getServiceName(serviceName), instance.getIp(),
+                instance.getPort()));
         return "ok";
     }
     
@@ -136,6 +135,9 @@ public class InstanceController {
         NamingUtils.checkServiceNameFormat(serviceName);
         
         getInstanceOperator().removeInstance(namespaceId, serviceName, instance);
+        NotifyCenter.publishEvent(new DeregisterInstanceTraceEvent(System.currentTimeMillis(), "", false,
+                DeregisterInstanceReason.REQUEST, namespaceId, NamingUtils.getGroupName(serviceName),
+                NamingUtils.getServiceName(serviceName), instance.getIp(), instance.getPort()));
         return "ok";
     }
     
@@ -272,10 +274,6 @@ public class InstanceController {
         if (StringUtils.isNotBlank(metadata)) {
             patchObject.setMetadata(UtilsAndCommons.parseMetadata(metadata));
         }
-        String app = WebUtils.optional(request, "app", StringUtils.EMPTY);
-        if (StringUtils.isNotBlank(app)) {
-            patchObject.setApp(app);
-        }
         String weight = WebUtils.optional(request, "weight", StringUtils.EMPTY);
         if (StringUtils.isNotBlank(weight)) {
             patchObject.setWeight(Double.parseDouble(weight));
@@ -314,7 +312,7 @@ public class InstanceController {
         int udpPort = Integer.parseInt(WebUtils.optional(request, "udpPort", "0"));
         boolean healthyOnly = Boolean.parseBoolean(WebUtils.optional(request, "healthyOnly", "false"));
         String app = WebUtils.optional(request, "app", StringUtils.EMPTY);
-
+        
         Subscriber subscriber = new Subscriber(clientIP + ":" + udpPort, agent, app, clientIP, namespaceId, serviceName,
                 udpPort, clusters);
         return getInstanceOperator().listInstance(namespaceId, serviceName, subscriber, clusters, healthyOnly);
@@ -437,6 +435,6 @@ public class InstanceController {
     }
     
     private InstanceOperator getInstanceOperator() {
-        return upgradeJudgement.isUseGrpcFeatures() ? instanceServiceV2 : instanceServiceV1;
+        return instanceServiceV2;
     }
 }
