@@ -16,6 +16,7 @@
 
 package com.alibaba.nacos.client.naming.remote.gprc;
 
+import com.alibaba.nacos.api.common.Constants;
 import com.alibaba.nacos.api.exception.NacosException;
 import com.alibaba.nacos.api.naming.CommonParams;
 import com.alibaba.nacos.api.naming.pojo.Instance;
@@ -47,11 +48,13 @@ import com.alibaba.nacos.client.naming.remote.gprc.redo.NamingGrpcRedoService;
 import com.alibaba.nacos.client.naming.remote.gprc.redo.data.BatchInstanceRedoData;
 import com.alibaba.nacos.client.naming.remote.gprc.redo.data.InstanceRedoData;
 import com.alibaba.nacos.client.security.SecurityProxy;
+import com.alibaba.nacos.client.utils.AppNameUtils;
 import com.alibaba.nacos.common.notify.Event;
 import com.alibaba.nacos.common.notify.NotifyCenter;
 import com.alibaba.nacos.common.remote.ConnectionType;
 import com.alibaba.nacos.common.remote.client.RpcClient;
 import com.alibaba.nacos.common.remote.client.RpcClientFactory;
+import com.alibaba.nacos.common.remote.client.RpcClientTlsConfig;
 import com.alibaba.nacos.common.remote.client.ServerListFactory;
 import com.alibaba.nacos.common.utils.CollectionUtils;
 import com.alibaba.nacos.common.utils.JacksonUtils;
@@ -92,8 +95,11 @@ public class NamingGrpcClientProxy extends AbstractNamingClientProxy {
         Map<String, String> labels = new HashMap<>();
         labels.put(RemoteConstants.LABEL_SOURCE, RemoteConstants.LABEL_SOURCE_SDK);
         labels.put(RemoteConstants.LABEL_MODULE, RemoteConstants.LABEL_MODULE_NAMING);
-        this.rpcClient = RpcClientFactory.createClient(uuid, ConnectionType.GRPC, labels);
+        labels.put(Constants.APPNAME, AppNameUtils.getAppName());
+        this.rpcClient = RpcClientFactory.createClient(uuid, ConnectionType.GRPC, labels,
+                RpcClientTlsConfig.properties(properties.asProperties()));
         this.redoService = new NamingGrpcRedoService(this);
+        NAMING_LOGGER.info("Create naming rpc client for uuid->{}", uuid);
         start(serverListFactory, serviceInfoHolder);
     }
     
@@ -133,8 +139,10 @@ public class NamingGrpcClientProxy extends AbstractNamingClientProxy {
     @Override
     public void batchDeregisterService(String serviceName, String groupName, List<Instance> instances)
             throws NacosException {
-        List<Instance> retainInstance = getRetainInstance(serviceName, groupName, instances);
-        batchRegisterService(serviceName, groupName, retainInstance);
+        synchronized (redoService.getRegisteredInstances()) {
+            List<Instance> retainInstance = getRetainInstance(serviceName, groupName, instances);
+            batchRegisterService(serviceName, groupName, retainInstance);
+        }
     }
     
     /**
@@ -212,11 +220,20 @@ public class NamingGrpcClientProxy extends AbstractNamingClientProxy {
     
     @Override
     public void deregisterService(String serviceName, String groupName, Instance instance) throws NacosException {
-        NAMING_LOGGER
-                .info("[DEREGISTER-SERVICE] {} deregistering service {} with instance: {}", namespaceId, serviceName,
-                        instance);
-        redoService.instanceDeregister(serviceName, groupName);
-        doDeregisterService(serviceName, groupName, instance);
+        NAMING_LOGGER.info("[DEREGISTER-SERVICE] {} deregistering service {} with instance: {}", namespaceId,
+                serviceName, instance);
+        String key = NamingUtils.getGroupedName(serviceName, groupName);
+        InstanceRedoData instanceRedoData = redoService.getRegisteredInstancesByKey(key);
+        if (instanceRedoData instanceof BatchInstanceRedoData) {
+            List<Instance> instances = new ArrayList<>();
+            if (null != instance) {
+                instances.add(instance);
+            }
+            batchDeregisterService(serviceName, groupName, instances);
+        } else {
+            redoService.instanceDeregister(serviceName, groupName);
+            doDeregisterService(serviceName, groupName, instance);
+        }
     }
     
     /**
@@ -240,12 +257,11 @@ public class NamingGrpcClientProxy extends AbstractNamingClientProxy {
     }
     
     @Override
-    public ServiceInfo queryInstancesOfService(String serviceName, String groupName, String clusters, int udpPort,
+    public ServiceInfo queryInstancesOfService(String serviceName, String groupName, String clusters,
             boolean healthyOnly) throws NacosException {
         ServiceQueryRequest request = new ServiceQueryRequest(namespaceId, serviceName, groupName);
         request.setCluster(clusters);
         request.setHealthyOnly(healthyOnly);
-        request.setUdpPort(udpPort);
         QueryServiceResponse response = requestToServer(request, QueryServiceResponse.class);
         return response.getServiceInfo();
     }
@@ -315,8 +331,8 @@ public class NamingGrpcClientProxy extends AbstractNamingClientProxy {
     @Override
     public void unsubscribe(String serviceName, String groupName, String clusters) throws NacosException {
         if (NAMING_LOGGER.isDebugEnabled()) {
-            NAMING_LOGGER
-                    .debug("[GRPC-UNSUBSCRIBE] service:{}, group:{}, cluster:{} ", serviceName, groupName, clusters);
+            NAMING_LOGGER.debug("[GRPC-UNSUBSCRIBE] service:{}, group:{}, cluster:{} ", serviceName, groupName,
+                    clusters);
         }
         redoService.subscriberDeregister(serviceName, groupName, clusters);
         doUnsubscribe(serviceName, groupName, clusters);
@@ -372,8 +388,21 @@ public class NamingGrpcClientProxy extends AbstractNamingClientProxy {
     
     @Override
     public void shutdown() throws NacosException {
-        rpcClient.shutdown();
+        NAMING_LOGGER.info("Shutdown naming grpc client proxy for  uuid->{}", uuid);
         redoService.shutdown();
+        shutDownAndRemove(uuid);
+        NotifyCenter.deregisterSubscriber(this);
+    }
+    
+    private void shutDownAndRemove(String uuid) {
+        synchronized (RpcClientFactory.getAllClientEntries()) {
+            try {
+                RpcClientFactory.destroyClient(uuid);
+                NAMING_LOGGER.info("shutdown and remove naming rpc client  for uuid ->{}", uuid);
+            } catch (NacosException e) {
+                NAMING_LOGGER.warn("Fail to shutdown naming rpc client  for uuid ->{}", uuid);
+            }
+        }
     }
     
     public boolean isEnable() {

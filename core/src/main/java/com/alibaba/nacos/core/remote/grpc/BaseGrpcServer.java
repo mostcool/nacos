@@ -1,5 +1,5 @@
 /*
- * Copyright 1999-2020 Alibaba Group Holding Ltd.
+ * Copyright 1999-2023 Alibaba Group Holding Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,21 +20,24 @@ import com.alibaba.nacos.api.grpc.auto.Payload;
 import com.alibaba.nacos.common.remote.ConnectionType;
 import com.alibaba.nacos.core.remote.BaseRpcServer;
 import com.alibaba.nacos.core.remote.ConnectionManager;
+import com.alibaba.nacos.core.utils.Loggers;
 import com.alibaba.nacos.sys.env.EnvUtil;
 import io.grpc.CompressorRegistry;
 import io.grpc.DecompressorRegistry;
 import io.grpc.MethodDescriptor;
 import io.grpc.Server;
-import io.grpc.ServerBuilder;
 import io.grpc.ServerCallHandler;
 import io.grpc.ServerInterceptor;
 import io.grpc.ServerInterceptors;
 import io.grpc.ServerServiceDefinition;
+import io.grpc.netty.shaded.io.grpc.netty.InternalProtocolNegotiator;
+import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
 import io.grpc.protobuf.ProtoUtils;
 import io.grpc.stub.ServerCalls;
 import io.grpc.util.MutableHandlerRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import java.util.Optional;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
@@ -65,20 +68,47 @@ public abstract class BaseGrpcServer extends BaseRpcServer {
     @Override
     public void startServer() throws Exception {
         final MutableHandlerRegistry handlerRegistry = new MutableHandlerRegistry();
+        addServices(handlerRegistry, new GrpcConnectionInterceptor(), new GrpcServerParamCheckInterceptor());
+        NettyServerBuilder builder = NettyServerBuilder.forPort(getServicePort()).executor(getRpcExecutor());
         
-        addServices(handlerRegistry, new GrpcConnectionInterceptor());
+        Optional<InternalProtocolNegotiator.ProtocolNegotiator> negotiator = newProtocolNegotiator();
+        if (negotiator.isPresent()) {
+            InternalProtocolNegotiator.ProtocolNegotiator actual = negotiator.get();
+            Loggers.REMOTE.info("Add protocol negotiator {}", actual.getClass().getCanonicalName());
+            builder.protocolNegotiator(actual);
+        }
         
-        server = ServerBuilder.forPort(getServicePort()).executor(getRpcExecutor())
-                .maxInboundMessageSize(getMaxInboundMessageSize()).fallbackHandlerRegistry(handlerRegistry)
+        server = builder.maxInboundMessageSize(getMaxInboundMessageSize()).fallbackHandlerRegistry(handlerRegistry)
                 .compressorRegistry(CompressorRegistry.getDefaultInstance())
                 .decompressorRegistry(DecompressorRegistry.getDefaultInstance())
                 .addTransportFilter(new AddressTransportFilter(connectionManager))
                 .keepAliveTime(getKeepAliveTime(), TimeUnit.MILLISECONDS)
                 .keepAliveTimeout(getKeepAliveTimeout(), TimeUnit.MILLISECONDS)
-                .permitKeepAliveTime(getPermitKeepAliveTime(), TimeUnit.MILLISECONDS)
-                .build();
+                .permitKeepAliveTime(getPermitKeepAliveTime(), TimeUnit.MILLISECONDS).build();
         
         server.start();
+    }
+    
+    @Override
+    public void reloadProtocolContext() {
+        reloadProtocolNegotiator();
+    }
+    
+    /**
+     * Build new one protocol negotiator.
+     *
+     * <p>Such as support tls, proxy protocol and so on</p>
+     *
+     * @return ProtocolNegotiator
+     */
+    protected Optional<InternalProtocolNegotiator.ProtocolNegotiator> newProtocolNegotiator() {
+        return Optional.empty();
+    }
+    
+    /**
+     * reload protocol negotiator If necessary.
+     */
+    public void reloadProtocolNegotiator() {
     }
     
     protected long getPermitKeepAliveTime() {
@@ -94,8 +124,8 @@ public abstract class BaseGrpcServer extends BaseRpcServer {
     }
     
     protected int getMaxInboundMessageSize() {
-        Integer property = EnvUtil.getProperty(GrpcServerConstants.GrpcConfig.MAX_INBOUND_MSG_SIZE_PROPERTY,
-                Integer.class);
+        Integer property = EnvUtil
+                .getProperty(GrpcServerConstants.GrpcConfig.MAX_INBOUND_MSG_SIZE_PROPERTY, Integer.class);
         if (property != null) {
             return property;
         }
@@ -106,18 +136,18 @@ public abstract class BaseGrpcServer extends BaseRpcServer {
         
         // unary common call register.
         final MethodDescriptor<Payload, Payload> unaryPayloadMethod = MethodDescriptor.<Payload, Payload>newBuilder()
-                .setType(MethodDescriptor.MethodType.UNARY)
-                .setFullMethodName(MethodDescriptor.generateFullMethodName(GrpcServerConstants.REQUEST_SERVICE_NAME,
-                        GrpcServerConstants.REQUEST_METHOD_NAME))
+                .setType(MethodDescriptor.MethodType.UNARY).setFullMethodName(MethodDescriptor
+                        .generateFullMethodName(GrpcServerConstants.REQUEST_SERVICE_NAME,
+                                GrpcServerConstants.REQUEST_METHOD_NAME))
                 .setRequestMarshaller(ProtoUtils.marshaller(Payload.getDefaultInstance()))
                 .setResponseMarshaller(ProtoUtils.marshaller(Payload.getDefaultInstance())).build();
         
-        final ServerCallHandler<Payload, Payload> payloadHandler = ServerCalls
-                .asyncUnaryCall((request, responseObserver) -> grpcCommonRequestAcceptor.request(request, responseObserver));
+        final ServerCallHandler<Payload, Payload> payloadHandler = ServerCalls.asyncUnaryCall(
+                (request, responseObserver) -> grpcCommonRequestAcceptor.request(request, responseObserver));
         
-        final ServerServiceDefinition serviceDefOfUnaryPayload = ServerServiceDefinition.builder(
-                        GrpcServerConstants.REQUEST_SERVICE_NAME)
-                .addMethod(unaryPayloadMethod, payloadHandler).build();
+        final ServerServiceDefinition serviceDefOfUnaryPayload = ServerServiceDefinition
+                .builder(GrpcServerConstants.REQUEST_SERVICE_NAME).addMethod(unaryPayloadMethod, payloadHandler)
+                .build();
         handlerRegistry.addService(ServerInterceptors.intercept(serviceDefOfUnaryPayload, serverInterceptor));
         
         // bi stream register.
@@ -132,7 +162,8 @@ public abstract class BaseGrpcServer extends BaseRpcServer {
                 .setResponseMarshaller(ProtoUtils.marshaller(Payload.getDefaultInstance())).build();
         
         final ServerServiceDefinition serviceDefOfBiStream = ServerServiceDefinition
-                .builder(GrpcServerConstants.REQUEST_BI_STREAM_SERVICE_NAME).addMethod(biStreamMethod, biStreamHandler).build();
+                .builder(GrpcServerConstants.REQUEST_BI_STREAM_SERVICE_NAME).addMethod(biStreamMethod, biStreamHandler)
+                .build();
         handlerRegistry.addService(ServerInterceptors.intercept(serviceDefOfBiStream, serverInterceptor));
         
     }

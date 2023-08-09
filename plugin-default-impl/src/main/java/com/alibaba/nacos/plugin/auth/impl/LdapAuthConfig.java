@@ -21,6 +21,7 @@ import com.alibaba.nacos.plugin.auth.impl.authenticate.LdapAuthenticationManager
 import com.alibaba.nacos.plugin.auth.impl.configuration.ConditionOnLdapAuth;
 import com.alibaba.nacos.plugin.auth.impl.constant.AuthConstants;
 import com.alibaba.nacos.plugin.auth.impl.roles.NacosRoleServiceImpl;
+import com.alibaba.nacos.plugin.auth.impl.token.TokenManagerDelegate;
 import com.alibaba.nacos.plugin.auth.impl.users.NacosUserDetailsServiceImpl;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -61,10 +62,18 @@ public class LdapAuthConfig {
     @Value(("${" + AuthConstants.NACOS_CORE_AUTH_CASE_SENSITIVE + ":true}"))
     private boolean caseSensitive;
     
+    /**
+     * LDAP Ignore partial result exception {@link LdapTemplate#setIgnorePartialResultException(boolean)}.
+     */
+    @Value(("${" + AuthConstants.NACOS_CORE_AUTH_IGNORE_PARTIAL_RESULT_EXCEPTION + ":false}"))
+    private boolean ignorePartialResultException;
+    
     @Bean
     @Conditional(ConditionOnLdapAuth.class)
     public LdapTemplate ldapTemplate(LdapContextSource ldapContextSource) {
-        return new LdapTemplate(ldapContextSource);
+        LdapTemplate ldapTemplate = new LdapTemplate(ldapContextSource);
+        ldapTemplate.setIgnorePartialResultException(ignorePartialResultException);
+        return ldapTemplate;
     }
     
     @Bean
@@ -83,7 +92,7 @@ public class LdapAuthConfig {
     @Bean
     @Conditional(ConditionOnLdapAuth.class)
     public IAuthenticationManager ldapAuthenticatoinManager(LdapTemplate ldapTemplate,
-            NacosUserDetailsServiceImpl userDetailsService, JwtTokenManager jwtTokenManager,
+            NacosUserDetailsServiceImpl userDetailsService, TokenManagerDelegate jwtTokenManager,
             NacosRoleServiceImpl roleService) {
         return new LdapAuthenticationManager(ldapTemplate, userDetailsService, jwtTokenManager, roleService,
                 filterPrefix, caseSensitive);
