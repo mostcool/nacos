@@ -78,7 +78,7 @@ public class HistoryConfigInfoMapperByDerbyTest {
         MapperResult mapperResult = historyConfigInfoMapperByDerby.findDeletedConfig(context);
         Assert.assertEquals(mapperResult.getSql(),
                 "SELECT data_id, group_id, tenant_id,gmt_modified,nid FROM his_config_info WHERE op_type = 'D' "
-                        + "AND gmt_modified >= ? and nid > ? order by nid limit ? ");
+                        + "AND gmt_modified >= ? and nid > ? order by nid OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY");
         
         Assert.assertArrayEquals(mapperResult.getParamList().toArray(), new Object[] {startTime, lastMaxId, pageSize});
     }
@@ -107,7 +107,7 @@ public class HistoryConfigInfoMapperByDerbyTest {
         MapperResult mapperResult = historyConfigInfoMapperByDerby.detailPreviousConfigHistory(context);
         Assert.assertEquals(mapperResult.getSql(),
                 "SELECT nid,data_id,group_id,tenant_id,app_name,content,md5,src_user,src_ip,op_type,gmt_create,"
-                        + "gmt_modified FROM his_config_info WHERE nid = (SELECT max(nid) FROM his_config_info WHERE id = ?)");
+                        + "gmt_modified,encrypted_data_key FROM his_config_info WHERE nid = (SELECT max(nid) FROM his_config_info WHERE id = ?)");
         Assert.assertArrayEquals(mapperResult.getParamList().toArray(), new Object[] {id});
     }
     
