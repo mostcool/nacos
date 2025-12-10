@@ -46,6 +46,19 @@ const configurationMenu = {
     },
   ],
 };
+
+export const McpServerManagementRoute = '/mcpServerManagement';
+const AiControlMenu = {
+  key: 'AiManagementVirtual',
+  badge: 'new',
+  children: [
+    {
+      key: 'mcpList',
+      url: McpServerManagementRoute,
+    },
+  ],
+};
+
 /**
  * 权限控制相关
  */
@@ -83,6 +96,19 @@ const settingMenu = {
   key: 'settingCenter',
   url: '/settingCenter',
 };
+
+const agentManagementMenu = {
+  key: 'agentManagement',
+  badge: 'new',
+  url: '/agentManagement',
+  children: [
+    {
+      key: 'agentList',
+      url: '/agentManagement',
+    },
+  ],
+};
+
 export default function(model) {
   const { token = '{}' } = localStorage;
   const { globalAdmin } = isJsonString(token) ? JSON.parse(token) || {} : {};
@@ -93,6 +119,8 @@ export default function(model) {
     result.push(configurationMenu);
   } else {
     result.push(configurationMenu, serviceDiscoveryMenu);
+    result.push(AiControlMenu);
+    result.push(agentManagementMenu);
   }
   if (globalAdmin) {
     result.push(authorityControlMenu);

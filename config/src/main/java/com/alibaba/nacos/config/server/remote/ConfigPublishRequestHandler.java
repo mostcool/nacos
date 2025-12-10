@@ -34,6 +34,7 @@ import com.alibaba.nacos.config.server.model.form.ConfigForm;
 import com.alibaba.nacos.config.server.service.ConfigOperationService;
 import com.alibaba.nacos.config.server.utils.ParamUtils;
 import com.alibaba.nacos.core.control.TpsControl;
+import com.alibaba.nacos.core.namespace.filter.NamespaceValidation;
 import com.alibaba.nacos.core.paramcheck.ExtractorManager;
 import com.alibaba.nacos.core.paramcheck.impl.ConfigRequestParamExtractor;
 import com.alibaba.nacos.core.remote.RequestHandler;
@@ -61,6 +62,7 @@ public class ConfigPublishRequestHandler extends RequestHandler<ConfigPublishReq
     }
     
     @Override
+    @NamespaceValidation
     @TpsControl(pointName = "ConfigPublish")
     @Secured(action = ActionTypes.WRITE, signType = SignType.CONFIG)
     @ExtractorManager.Extractor(rpcExtractor = ConfigRequestParamExtractor.class)
@@ -70,6 +72,7 @@ public class ConfigPublishRequestHandler extends RequestHandler<ConfigPublishReq
             String dataId = request.getDataId();
             String group = request.getGroup();
             String content = request.getContent();
+            final boolean namespaceTransferred = NamespaceUtil.isNeedTransferNamespace(request.getTenant());
             final String tenant = NamespaceUtil.processNamespaceParameter(request.getTenant());
             
             final String srcIp = meta.getClientIp();
@@ -108,6 +111,7 @@ public class ConfigPublishRequestHandler extends RequestHandler<ConfigPublishReq
             configRequestInfo.setRequestIpApp(meta.getLabels().get(Constants.APPNAME));
             configRequestInfo.setBetaIps(request.getAdditionParam("betaIps"));
             configRequestInfo.setCasMd5(request.getCasMd5());
+            configRequestInfo.setNamespaceTransferred(namespaceTransferred);
             
             String encryptedDataKeyFinal = null;
             if (StringUtils.isNotBlank(encryptedDataKey)) {

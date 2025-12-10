@@ -54,7 +54,7 @@ public class GrpcConnection extends Connection {
     
     private Channel channel;
     
-    private static TpsControlManager tpsControlManager;
+    private static volatile TpsControlManager tpsControlManager;
     
     public GrpcConnection(ConnectionMeta metaInfo, StreamObserver streamObserver, Channel channel) {
         super(metaInfo);
@@ -108,7 +108,7 @@ public class GrpcConnection extends Connection {
             boolean ready = ((ServerCallStreamObserver<?>) streamObserver).isReady();
             if (!ready) {
                 if (tpsControlManager == null) {
-                    synchronized (GrpcConnection.class.getClass()) {
+                    synchronized (GrpcConnection.class) {
                         if (tpsControlManager == null) {
                             tpsControlManager = ControlManagerCenter.getInstance().getTpsControlManager();
                             tpsControlManager.registerTpsPoint("SERVER_PUSH_BLOCK");
@@ -149,7 +149,12 @@ public class GrpcConnection extends Connection {
                 callBack, () -> RpcAckCallbackSynchronizer.clearFuture(getMetaInfo().getConnectionId(), requestId));
         
         RpcAckCallbackSynchronizer.syncCallback(getMetaInfo().getConnectionId(), requestId, defaultPushFuture);
-        sendRequestNoAck(request);
+        try {
+            sendRequestNoAck(request);
+        } catch (NacosRuntimeException nacosRuntimeException) {
+            defaultPushFuture.cancel(true);
+            throw nacosRuntimeException;
+        }
         return defaultPushFuture;
     }
     

@@ -64,6 +64,16 @@ public final class WhereBuilder {
         return this;
     }
     
+    public WhereBuilder startParentheses() {
+        where.append(" ( ");
+        return this;
+    }
+    
+    public WhereBuilder endParentheses() {
+        where.append(" ) ");
+        return this;
+    }
+    
     /**
      * Build OR.
      *
@@ -148,6 +158,17 @@ public final class WhereBuilder {
                 .append(startRow)
                 .append(Symbols.COMMA)
                 .append(pageSize);
+        return this;
+    }
+    
+    /**
+     * Build GROUP BY.
+     *
+     * @param fields Group by fields
+     * @return Return {@link WhereBuilder}
+     */
+    public WhereBuilder groupBy(String fields) {
+        where.append(" GROUP BY ").append(fields);
         return this;
     }
     

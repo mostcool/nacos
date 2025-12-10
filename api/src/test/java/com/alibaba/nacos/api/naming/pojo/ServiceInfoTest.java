@@ -22,6 +22,8 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
@@ -58,7 +60,7 @@ class ServiceInfoTest {
         assertTrue(actual.contains("\"lastRefTime\":0"));
         assertTrue(actual.contains("\"checksum\":\"\""));
         assertTrue(actual.contains("\"valid\":true"));
-        assertTrue(actual.contains("\"allIPs\":false"));
+        assertTrue(actual.contains("\"allIps\":false"));
         assertFalse(actual.contains("jsonFromServer"));
         assertFalse(actual.contains("key"));
         assertFalse(actual.contains("keyEncoded"));
@@ -67,7 +69,7 @@ class ServiceInfoTest {
     @Test
     void testDeserialize() throws IOException {
         String example = "{\"name\":\"G@@testName\",\"clusters\":\"testClusters\",\"cacheMillis\":1000,\"hosts\":[],"
-                + "\"lastRefTime\":0,\"checksum\":\"\",\"allIPs\":false,\"valid\":true,\"groupName\":\"\"}";
+                + "\"lastRefTime\":0,\"checksum\":\"\",\"allIps\":false,\"valid\":true,\"groupName\":\"\"}";
         ServiceInfo actual = mapper.readValue(example, ServiceInfo.class);
         assertEquals("G@@testName", actual.getName());
         assertEquals(0, actual.ipCount());
@@ -79,7 +81,7 @@ class ServiceInfoTest {
         assertTrue(actual.expired());
         assertTrue(actual.getHosts().isEmpty());
         assertTrue(actual.isValid());
-        assertFalse(actual.isAllIPs());
+        assertFalse(actual.isAllIps());
     }
     
     @Test
@@ -102,6 +104,16 @@ class ServiceInfoTest {
     }
     
     @Test
+    void testGetKeyWithException() {
+        try (MockedStatic<URLEncoder> mockedStatic = Mockito.mockStatic(URLEncoder.class)) {
+            mockedStatic.when(() -> URLEncoder.encode(Mockito.anyString(), Mockito.anyString()))
+                    .thenThrow(new UnsupportedEncodingException());
+            String key = serviceInfo.getKeyEncoded();
+            assertEquals(key, ServiceInfo.getKey("G@@testName", "testClusters"));
+        }
+    }
+    
+    @Test
     void testServiceInfoConstructor() {
         String key1 = "group@@name";
         String key2 = "group@@name@@c2";
@@ -121,7 +133,7 @@ class ServiceInfoTest {
     
     @Test
     void testValidateForAllIps() {
-        serviceInfo.setAllIPs(true);
+        serviceInfo.setAllIps(true);
         assertTrue(serviceInfo.validate());
     }
     
@@ -174,5 +186,20 @@ class ServiceInfoTest {
         ServiceInfo actual = mapper.readValue(serviceInfo.getJsonFromServer(), ServiceInfo.class);
         assertEquals(StringUtils.EMPTY, actual.getJsonFromServer());
         assertTrue(actual.isReachProtectionThreshold());
+    }
+    
+    @Test
+    void testGetKeyWithoutClusters() {
+        // 测试带groupName的情况
+        ServiceInfo serviceInfo1 = new ServiceInfo("group@@name", "cluster");
+        assertEquals("group@@name", serviceInfo1.getKeyWithoutClusters());
+        
+        // 测试不带groupName的情况
+        ServiceInfo serviceInfo2 = new ServiceInfo("name", "cluster");
+        assertEquals("name", serviceInfo2.getKeyWithoutClusters());
+        
+        // 测试name中已经包含@@的情况
+        ServiceInfo serviceInfo3 = new ServiceInfo("group@@name@@cluster", "");
+        assertEquals("group@@name@@cluster", serviceInfo3.getKeyWithoutClusters());
     }
 }

@@ -45,6 +45,10 @@ public class DefaultParamChecker extends AbstractParamChecker {
     
     private Pattern ipPattern;
     
+    private Pattern mcpNamePattern;
+    
+    private Pattern agentNamePattern;
+    
     private static final String CHECKER_TYPE = "default";
     
     private static final String MAX_METADATA_LENGTH_PROP_NAME = "nacos.naming.service.metadata.length";
@@ -88,6 +92,8 @@ public class DefaultParamChecker extends AbstractParamChecker {
         this.groupPattern = Pattern.compile(this.paramCheckRule.groupPatternString);
         this.clusterPattern = Pattern.compile(this.paramCheckRule.clusterPatternString);
         this.ipPattern = Pattern.compile(this.paramCheckRule.ipPatternString);
+        this.mcpNamePattern = Pattern.compile(this.paramCheckRule.mcpNamePatternString);
+        this.agentNamePattern = Pattern.compile(this.paramCheckRule.agentNamePatternString);
     }
     
     /**
@@ -149,6 +155,14 @@ public class DefaultParamChecker extends AbstractParamChecker {
             return paramCheckResponse;
         }
         paramCheckResponse = checkMetadataFormat(paramInfo.getMetadata());
+        if (!paramCheckResponse.isSuccess()) {
+            return paramCheckResponse;
+        }
+        paramCheckResponse = checkMcpNameFormat(paramInfo.getMcpName());
+        if (!paramCheckResponse.isSuccess()) {
+            return paramCheckResponse;
+        }
+        paramCheckResponse = checkAgentNameFormat(paramInfo.getAgentName());
         if (!paramCheckResponse.isSuccess()) {
             return paramCheckResponse;
         }
@@ -424,6 +438,60 @@ public class DefaultParamChecker extends AbstractParamChecker {
             paramCheckResponse.setSuccess(false);
             paramCheckResponse.setMessage(
                     String.format("Param 'Metadata' is illegal, the param length should not exceed %d.", paramCheckRule.maxMetadataLength));
+            return paramCheckResponse;
+        }
+        paramCheckResponse.setSuccess(true);
+        return paramCheckResponse;
+    }
+    
+    /**
+     * Check mcp name format.
+     *
+     * @param mcpName the mcp name
+     * @return the param check response
+     */
+    public ParamCheckResponse checkMcpNameFormat(String mcpName) {
+        ParamCheckResponse paramCheckResponse = new ParamCheckResponse();
+        if (StringUtils.isBlank(mcpName)) {
+            paramCheckResponse.setSuccess(true);
+            return paramCheckResponse;
+        }
+        if (mcpName.length() > paramCheckRule.maxMcpNameLength) {
+            paramCheckResponse.setSuccess(false);
+            paramCheckResponse.setMessage(
+                    String.format("Param 'mcpName' is illegal, the param length should not exceed %d.", paramCheckRule.maxClusterLength));
+            return paramCheckResponse;
+        }
+        if (!mcpNamePattern.matcher(mcpName).matches()) {
+            paramCheckResponse.setSuccess(false);
+            paramCheckResponse.setMessage("Param 'mcpName' is illegal, illegal characters should not appear in the param.");
+            return paramCheckResponse;
+        }
+        paramCheckResponse.setSuccess(true);
+        return paramCheckResponse;
+    }
+    
+    /**
+     * Check agent name format.
+     *
+     * @param agentName agent name
+     * @return the param check response
+     */
+    public ParamCheckResponse checkAgentNameFormat(String agentName) {
+        ParamCheckResponse paramCheckResponse = new ParamCheckResponse();
+        if (StringUtils.isBlank(agentName)) {
+            paramCheckResponse.setSuccess(true);
+            return paramCheckResponse;
+        }
+        if (agentName.length() > paramCheckRule.maxAgentNameLength) {
+            paramCheckResponse.setSuccess(false);
+            paramCheckResponse.setMessage(
+                    String.format("Param 'agentName' is illegal, the param length should not exceed %d.", paramCheckRule.maxAgentNameLength));
+            return paramCheckResponse;
+        }
+        if (!agentNamePattern.matcher(agentName).matches()) {
+            paramCheckResponse.setSuccess(false);
+            paramCheckResponse.setMessage("Param 'agentName' is illegal, illegal characters should not appear in the param.");
             return paramCheckResponse;
         }
         paramCheckResponse.setSuccess(true);

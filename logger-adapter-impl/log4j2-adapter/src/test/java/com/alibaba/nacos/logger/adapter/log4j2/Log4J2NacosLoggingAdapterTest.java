@@ -20,7 +20,6 @@ import com.alibaba.nacos.common.logging.NacosLoggingProperties;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LoggerContext;
 import org.apache.logging.log4j.core.config.Configuration;
-import org.apache.logging.log4j.core.config.ConfigurationSource;
 import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,11 +29,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.beans.PropertyChangeListener;
-import java.io.IOException;
-import java.io.InputStream;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.net.URL;
 import java.util.Map;
 import java.util.logging.Logger;
 
@@ -43,10 +37,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class Log4J2NacosLoggingAdapterTest {
@@ -106,7 +98,7 @@ class Log4J2NacosLoggingAdapterTest {
         loggerContext = (LoggerContext) LogManager.getContext(false);
         contextConfiguration = loggerContext.getConfiguration();
         Map<String, LoggerConfig> nacosClientLoggers = contextConfiguration.getLoggers();
-        assertEquals(6, nacosClientLoggers.size());
+        assertEquals(7, nacosClientLoggers.size());
         for (Map.Entry<String, LoggerConfig> loggerEntry : nacosClientLoggers.entrySet()) {
             String loggerName = loggerEntry.getKey();
             assertTrue(loggerName.startsWith(NACOS_LOGGER_PREFIX));
@@ -133,17 +125,4 @@ class Log4J2NacosLoggingAdapterTest {
         });
     }
     
-    @Test
-    void testGetConfigurationSourceForNonFileProtocol()
-            throws NoSuchMethodException, IOException, InvocationTargetException, IllegalAccessException {
-        Method getConfigurationSourceMethod = Log4J2NacosLoggingAdapter.class.getDeclaredMethod("getConfigurationSource", URL.class);
-        getConfigurationSourceMethod.setAccessible(true);
-        URL url = mock(URL.class);
-        InputStream inputStream = mock(InputStream.class);
-        when(url.openStream()).thenReturn(inputStream);
-        when(url.getProtocol()).thenReturn("http");
-        ConfigurationSource actual = (ConfigurationSource) getConfigurationSourceMethod.invoke(log4J2NacosLoggingAdapter, url);
-        assertEquals(inputStream, actual.getInputStream());
-        assertEquals(url, actual.getURL());
-    }
 }
