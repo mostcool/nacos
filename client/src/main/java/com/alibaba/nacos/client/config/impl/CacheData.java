@@ -67,7 +67,7 @@ public class CacheData {
     static long initNotifyWarnTimeout() {
         String notifyTimeouts = System.getProperty("nacos.listener.notify.warn.timeout");
         if (StringUtils.isNotBlank(notifyTimeouts) && NumberUtils.isDigits(notifyTimeouts)) {
-            notifyWarnTimeout = Long.valueOf(notifyTimeouts);
+            notifyWarnTimeout = Long.parseLong(notifyTimeouts);
             LOGGER.info("config listener notify warn timeout millis is set to {}", notifyWarnTimeout);
         } else {
             LOGGER.info("config listener notify warn timeout millis use default {} millis ",
@@ -416,11 +416,10 @@ public class CacheData {
         return stringBuilder.toString();
     }
     
-    @SuppressWarnings("PMD.MethodTooLongRule")
     private void safeNotifyListener(final String dataId, final String group, final String content, final String type,
             final String md5, final String encryptedDataKey, final ManagerListenerWrap listenerWrap) {
         final Listener listener = listenerWrap.listener;
-        if (listenerWrap.inNotifying) {
+        if (!listenerWrap.inNotifying.compareAndSet(false, true)) {
             LOGGER.warn(
                     "[{}] [notify-currentSkip] dataId={}, group={},tenant={}, md5={}, listener={}, listener is not finish yet,will try next time.",
                     envName, dataId, group, tenant, md5, listener);
@@ -458,7 +457,6 @@ public class CacheData {
                             new LongNotifyHandler(listener.getClass().getSimpleName(), dataId, group, tenant, md5,
                                     notifyWarnTimeout, Thread.currentThread()), notifyWarnTimeout,
                             TimeUnit.MILLISECONDS);
-                    listenerWrap.inNotifying = true;
                     listener.receiveConfigInfo(contentTmp);
                     // compare lastContent and content
                     if (listener instanceof AbstractConfigChangeListener) {
@@ -482,7 +480,7 @@ public class CacheData {
                     LOGGER.error("[{}] [notify-error] dataId={}, group={},tenant={}, md5={}, listener={} tx={}",
                             envName, dataId, group, tenant, md5, listener, getTrace(t.getStackTrace(), 3));
                 } finally {
-                    listenerWrap.inNotifying = false;
+                    listenerWrap.inNotifying.set(false);
                     Thread.currentThread().setContextClassLoader(myClassLoader);
                     if (timeSchedule != null) {
                         timeSchedule.cancel(true);
@@ -505,12 +503,12 @@ public class CacheData {
                 job.run();
             }
         } catch (Throwable t) {
+            listenerWrap.inNotifying.set(false);
             LOGGER.error("[{}] [notify-listener-error] dataId={}, group={},tenant={}, md5={}, listener={} throwable={}",
                     envName, dataId, group, tenant, md5, listener, t.getCause());
         }
     }
     
-    @SuppressWarnings("PMD.AbstractClassShouldStartWithAbstractNamingRule")
     abstract class NotifyTask implements Runnable {
         
         boolean async = false;
@@ -603,7 +601,7 @@ public class CacheData {
     
     private static class ManagerListenerWrap {
         
-        boolean inNotifying = false;
+        final AtomicBoolean inNotifying = new AtomicBoolean(false);
         
         final Listener listener;
         
@@ -642,7 +640,7 @@ public class CacheData {
         
         @Override
         public int hashCode() {
-            return super.hashCode();
+            return listener.hashCode();
         }
         
     }

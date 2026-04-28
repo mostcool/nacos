@@ -4,7 +4,8 @@
 # Nacos: Dynamic  *Na*ming and *Co*nfiguration *S*ervice
 
 [![Gitter](https://badges.gitter.im/alibaba/nacos.svg)](https://gitter.im/alibaba/nacos?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)   [![License](https://img.shields.io/badge/license-Apache%202-4EB1BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
-[![Gitter](https://travis-ci.org/alibaba/nacos.svg?branch=master)](https://travis-ci.org/alibaba/nacos)
+[![CI](https://github.com/alibaba/nacos/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/alibaba/nacos/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/alibaba/nacos/branch/develop/graph/badge.svg)](https://app.codecov.io/gh/alibaba/nacos/tree/develop)
 [![](https://img.shields.io/badge/Nacos-Check%20Your%20Contribution-orange)](https://opensource.alibaba.com/contribution_leaderboard/details?projectValue=nacos)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/alibaba/nacos)
 
