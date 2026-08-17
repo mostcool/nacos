@@ -226,7 +226,9 @@ class ConfigInfoMapperByOracleTest {
         MapperResult mapperResult = configInfoMapperByOracle.findAllConfigInfo4Export(context);
         assertTrue(mapperResult.getSql().contains(
             "SELECT id,data_id,group_id,tenant_id,app_name,content,type,md5,gmt_create,gmt_modified"));
-        assertArrayEquals(mapperResult.getParamList().toArray(), ids.toArray());
+        assertTrue(mapperResult.getSql().contains(" id IN (?, ?, ?, ?, ?)  AND tenant_id = ? "));
+        assertArrayEquals(new Object[] {1L, 2L, 3L, 5L, 144L, tenantId},
+            mapperResult.getParamList().toArray());
         
         context.putWhereParameter(FieldConstant.IDS, null);
         mapperResult = configInfoMapperByOracle.findAllConfigInfo4Export(context);
@@ -291,9 +293,31 @@ class ConfigInfoMapperByOracleTest {
     void testFindConfigInfoLike4PageCountRows() {
         MapperResult mapperResult =
             configInfoMapperByOracle.findConfigInfoLike4PageCountRows(context);
-        assertEquals("SELECT count(*) FROM config_info WHERE tenant_id LIKE ?  AND app_name = ? ",
-            mapperResult.getSql());
+        assertEquals("SELECT count(*) FROM config_info WHERE tenant_id LIKE ? ESCAPE '\\' "
+            + " AND app_name = ? ", mapperResult.getSql());
         assertArrayEquals(new Object[] {tenantId, appName}, mapperResult.getParamList().toArray());
+    }
+    
+    @Test
+    void testFindConfigInfoLike4PageFetchRowsDeclaresLikeEscape() {
+        context.putWhereParameter(FieldConstant.DATA_ID, dataId);
+        context.putWhereParameter(FieldConstant.GROUP_ID, groupId);
+        context.putWhereParameter(FieldConstant.CONTENT, "content");
+        MapperResult mapperResult =
+            configInfoMapperByOracle.findConfigInfoLike4PageFetchRows(context);
+        String sql = mapperResult.getSql();
+        assertTrue(sql.contains("tenant_id LIKE ? ESCAPE '\\'"));
+        assertTrue(sql.contains("data_id LIKE ? ESCAPE '\\'"));
+        assertTrue(sql.contains("group_id LIKE ? ESCAPE '\\'"));
+        assertTrue(sql.contains("content LIKE ? ESCAPE '\\'"));
+    }
+    
+    @Test
+    void testFindAllConfigInfo4ExportDeclaresLikeEscape() {
+        context.putWhereParameter(FieldConstant.IDS, null);
+        context.putWhereParameter(FieldConstant.DATA_ID, dataId);
+        MapperResult mapperResult = configInfoMapperByOracle.findAllConfigInfo4Export(context);
+        assertTrue(mapperResult.getSql().contains(" AND data_id LIKE ? ESCAPE '\\' "));
     }
     
     @Test

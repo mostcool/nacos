@@ -18,8 +18,7 @@ package com.alibaba.nacos.ai.service.agentspecs;
 
 import com.alibaba.nacos.ai.pipeline.PublishPipelineExecutor;
 import com.alibaba.nacos.ai.pipeline.PublishPipelineManager;
-import com.alibaba.nacos.ai.pipeline.config.PipelineConfigProvider;
-import com.alibaba.nacos.ai.pipeline.model.PipelineConfig;
+import com.alibaba.nacos.ai.pipeline.TestAiPipelineSupport;
 import com.alibaba.nacos.ai.pipeline.repository.PipelineExecutionRepository;
 import com.alibaba.nacos.ai.service.repository.AiResourcePersistService;
 import com.alibaba.nacos.ai.service.repository.AiResourceVersionPersistService;
@@ -43,11 +42,12 @@ import org.springframework.core.env.StandardEnvironment;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
 
@@ -83,9 +83,6 @@ class AgentSpecConcurrentSaveTest {
     private AiResourceVersionPersistService aiResourceVersionPersistService;
     
     @Mock
-    private PipelineConfigProvider pipelineConfigProvider;
-    
-    @Mock
     private PipelineExecutionRepository pipelineExecutionRepository;
     
     private AgentSpecOperationServiceImpl service;
@@ -112,12 +109,10 @@ class AgentSpecConcurrentSaveTest {
         AiResourceStorageRouter.reset();
         lenient().when(storage.type()).thenReturn("nacos_config");
         AiResourceStorageRouter.join(storage);
-        PipelineConfig disabledConfig = new PipelineConfig();
-        disabledConfig.setEnabled(false);
-        lenient().when(pipelineConfigProvider.getConfig()).thenReturn(disabledConfig);
+        PublishPipelineManager pipelineManager = TestAiPipelineSupport.newManager(false,
+            Collections.emptyList(), Collections.emptyList());
         PublishPipelineExecutor publishPipelineExecutor = new PublishPipelineExecutor(
-            new PublishPipelineManager(), pipelineConfigProvider, pipelineExecutionRepository,
-            Executors.newSingleThreadExecutor());
+            pipelineManager, pipelineExecutionRepository, Executors.newSingleThreadExecutor());
         service = new AgentSpecOperationServiceImpl(aiResourcePersistService,
             aiResourceVersionPersistService, publishPipelineExecutor,
             new AiResourceManager(aiResourcePersistService, aiResourceVersionPersistService,
@@ -127,6 +122,7 @@ class AgentSpecConcurrentSaveTest {
     @AfterEach
     void tearDown() {
         AiResourceStorageRouter.reset();
+        TestAiPipelineSupport.clearStateChecker();
         EnvUtil.setEnvironment(CACHED_ENVIRONMENT);
     }
     
@@ -153,7 +149,7 @@ class AgentSpecConcurrentSaveTest {
         resources.put("res-c", buildResource("res-c", "other", "gamma"));
         agentSpec.setResource(resources);
         
-        Set<String> capturedKeys = new HashSet<>();
+        Set<String> capturedKeys = ConcurrentHashMap.newKeySet();
         lenient().doAnswer(invocation -> {
             StorageKey key = invocation.getArgument(0);
             capturedKeys.add(key.getKey());
@@ -229,9 +225,9 @@ class AgentSpecConcurrentSaveTest {
     private void invokeConcurrentSave(String namespaceId, AgentSpec agentSpec, String version,
         long uniformId) throws Exception {
         Method method = AgentSpecOperationServiceImpl.class
-            .getDeclaredMethod("saveAgentSpecFilesConcurrently", String.class, AgentSpec.class,
-                String.class, long.class);
+            .getDeclaredMethod("saveAgentSpecFilesConcurrently", String.class, String.class,
+                AgentSpec.class, String.class, long.class);
         method.setAccessible(true);
-        method.invoke(service, namespaceId, agentSpec, version, uniformId);
+        method.invoke(service, storage.type(), namespaceId, agentSpec, version, uniformId);
     }
 }

@@ -48,7 +48,8 @@ Prompt follows the shared [AI Resource Lifecycle Spec](ai-resource-lifecycle-spe
 
 - create draft from new content or an existing version;
 - update or delete the current draft;
-- submit to publish pipeline or direct publish when no pipeline applies;
+- submit a draft or reviewed version to publish pipeline or direct publish when
+  no pipeline applies, and submit a reviewing version idempotently;
 - publish, force publish, online/offline, update labels, update description,
   update business tags, and delete;
 - query by explicit version, label, or `latest`.
@@ -64,7 +65,14 @@ server may return a not-modified error.
 Subscriptions should report Prompt changes without exposing broad management
 listing behavior to runtime clients.
 
-## 5. Migration
+## 5. Storage
+
+Prompt persists the selected storage provider in each version descriptor.
+Operations on an existing version use that persisted provider; the effective
+provider configuration applies only to new versions. A legacy descriptor
+without a provider uses `nacos_config`.
+
+## 6. Migration
 
 Prompt has a migration task from legacy Prompt storage to
 `ai_resource + ai_resource_version + AI storage`. Migration must:
@@ -74,7 +82,7 @@ Prompt has a migration task from legacy Prompt storage to
 - preserve existing versions and latest behavior where possible;
 - keep legacy mappings as compatibility storage, not formal Config semantics.
 
-## 6. Evolution Note
+## 7. Evolution Note
 
 Prompt formats, variable schemas, tool-call conventions, and model-provider
 requirements may change quickly. Prompt spec revisions may introduce new

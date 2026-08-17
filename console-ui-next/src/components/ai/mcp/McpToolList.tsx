@@ -18,6 +18,11 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import type { McpTool, McpToolMeta } from '@/types/mcp';
+import {
+  formatSchemaType,
+  getPrimarySchemaType,
+  type JsonSchemaType,
+} from '@/utils/json-schema';
 
 interface McpToolListProps {
   tools: McpTool[];
@@ -28,7 +33,7 @@ interface McpToolListProps {
 // ===== Schema Tree Types =====
 
 interface SchemaProperty {
-  type?: string;
+  type?: JsonSchemaType;
   description?: string;
   default?: unknown;
   enum?: unknown[];
@@ -91,25 +96,28 @@ function SchemaTreeNode({
   isLast: boolean;
 }) {
   const [expanded, setExpanded] = useState(depth < 2);
-  const type = schema.type || 'string';
+  const type = getPrimarySchemaType(schema.type);
+  const typeLabel = formatSchemaType(schema.type);
+  const itemType = getPrimarySchemaType(schema.items?.type);
+  const itemTypeLabel = formatSchemaType(schema.items?.type);
 
   const childProperties =
     type === 'object'
       ? schema.properties
-      : type === 'array' && schema.items?.type === 'object'
+      : type === 'array' && itemType === 'object'
         ? schema.items?.properties
         : undefined;
   const childRequired =
     type === 'object'
       ? schema.required
-      : type === 'array' && schema.items?.type === 'object'
+      : type === 'array' && itemType === 'object'
         ? schema.items?.required
         : undefined;
   const hasChildren = childProperties && Object.keys(childProperties).length > 0;
 
   const arrayItemType =
-    type === 'array' && schema.items && schema.items.type !== 'object'
-      ? schema.items.type
+    type === 'array' && schema.items && itemType !== 'object'
+      ? itemTypeLabel
       : undefined;
 
   const typeStyle = TYPE_STYLES[type] || {
@@ -170,7 +178,7 @@ function SchemaTreeNode({
             typeStyle.badge,
           )}
         >
-          {type}
+          {typeLabel}
           {arrayItemType && `<${arrayItemType}>`}
         </span>
 
@@ -227,13 +235,13 @@ function SchemaTreeNode({
             <div className="absolute left-0 top-0 h-[18px] w-px bg-border/60" />
             <div className="absolute left-0 top-[18px] w-3 h-px bg-border/60" />
             <div className="ml-3 pl-3 py-[5px] flex items-center gap-1.5">
-              <span className={cn('h-1.5 w-1.5 rounded-full', TYPE_STYLES[schema.items.type]?.dot || 'bg-gray-400')} />
+              <span className={cn('h-1.5 w-1.5 rounded-full', TYPE_STYLES[itemType]?.dot || 'bg-gray-400')} />
               <span className="text-[11px] text-muted-foreground font-mono">items</span>
               <span className={cn(
                 'text-[10px] font-medium px-1.5 py-px rounded ring-1 ring-inset leading-4',
-                TYPE_STYLES[schema.items.type]?.badge || 'bg-gray-50 text-gray-600 ring-gray-500/20',
+                TYPE_STYLES[itemType]?.badge || 'bg-gray-50 text-gray-600 ring-gray-500/20',
               )}>
-                {schema.items.type}
+                {itemTypeLabel}
               </span>
               {schema.items.description && (
                 <span className="text-[11px] text-muted-foreground truncate opacity-80">
@@ -375,6 +383,24 @@ function RequestTemplateSection({ data }: { data: Record<string, unknown> }) {
   );
 }
 
+// ===== Args Position Section =====
+
+function ArgsPositionSection({ data }: { data: Record<string, string> }) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="overflow-hidden">
+      <div className="flex items-center gap-2 mb-2.5">
+        <Braces className="h-3.5 w-3.5 text-violet-500" />
+        <h5 className="text-sm font-semibold">{t('mcp.argsPosition')}</h5>
+      </div>
+      <pre className="text-xs font-mono rounded-lg border border-violet-200/60 dark:border-violet-800/40 bg-violet-50/30 dark:bg-violet-950/10 p-3 overflow-x-auto max-w-full break-all whitespace-pre-wrap">
+        {JSON.stringify(data, null, 2)}
+      </pre>
+    </div>
+  );
+}
+
 // ===== Response Template Section =====
 
 function ResponseTemplateSection({ data }: { data: Record<string, unknown> }) {
@@ -408,6 +434,24 @@ function ResponseTemplateSection({ data }: { data: Record<string, unknown> }) {
           <div key={key}>{renderCodeBlock(key, value)}</div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ===== Error Response Template Section =====
+
+function ErrorResponseTemplateSection({ data }: { data: string }) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="overflow-hidden">
+      <div className="flex items-center gap-2 mb-2.5">
+        <FileOutput className="h-3.5 w-3.5 text-red-500" />
+        <h5 className="text-sm font-semibold">{t('mcp.errorResponseTemplate')}</h5>
+      </div>
+      <pre className="text-xs font-mono rounded-lg border border-red-200/60 dark:border-red-800/40 bg-red-50/30 dark:bg-red-950/10 p-3 overflow-x-auto max-w-full break-all whitespace-pre-wrap">
+        {data}
+      </pre>
     </div>
   );
 }
@@ -455,9 +499,18 @@ export function McpToolList({ tools, toolsMeta, className }: McpToolListProps) {
   const security = tmpl ? (tmpl as Record<string, unknown>).security : undefined;
   const hasRequestTemplate =
     tmpl?.requestTemplate && Object.keys(tmpl.requestTemplate).length > 0;
+  const hasArgsPosition =
+    tmpl?.argsPosition && Object.keys(tmpl.argsPosition).length > 0;
   const hasResponseTemplate =
     tmpl?.responseTemplate && Object.keys(tmpl.responseTemplate).length > 0;
-  const hasTemplates = hasRequestTemplate || hasResponseTemplate || !!security;
+  const hasErrorResponseTemplate =
+    typeof tmpl?.errorResponseTemplate === 'string' && tmpl.errorResponseTemplate.length > 0;
+  const hasTemplates =
+    hasRequestTemplate ||
+    hasArgsPosition ||
+    hasResponseTemplate ||
+    hasErrorResponseTemplate ||
+    !!security;
 
   return (
     <div
@@ -708,11 +761,21 @@ export function McpToolList({ tools, toolsMeta, className }: McpToolListProps) {
                     />
                   )}
 
+                  {/* Args Position */}
+                  {hasArgsPosition && (
+                    <ArgsPositionSection data={tmpl!.argsPosition as Record<string, string>} />
+                  )}
+
                   {/* Response Template */}
                   {hasResponseTemplate && (
                     <ResponseTemplateSection
                       data={tmpl!.responseTemplate as Record<string, unknown>}
                     />
+                  )}
+
+                  {/* Error Response Template */}
+                  {hasErrorResponseTemplate && (
+                    <ErrorResponseTemplateSection data={tmpl!.errorResponseTemplate as string} />
                   )}
                 </div>
               )}

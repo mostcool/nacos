@@ -16,6 +16,7 @@
 
 package com.alibaba.nacos.plugin.visibility.spi;
 
+import com.alibaba.nacos.api.plugin.PluginConfigSpec;
 import com.alibaba.nacos.plugin.visibility.constant.VisibilityConstants;
 import com.alibaba.nacos.plugin.visibility.model.VisibilityQueryContext;
 import com.alibaba.nacos.plugin.visibility.model.VisibilityResource;
@@ -27,16 +28,21 @@ import java.util.Properties;
  *
  * @author xiweng.yy
  */
-public interface VisibilityService {
+public interface VisibilityService extends PluginConfigSpec {
     
     /**
      * Initialize service with external properties.
      *
-     * <p>Property source is managed by {@link VisibilityPluginManager}. Default no-op keeps backward compatibility
-     * for existing SPI implementations.</p>
+     * <p>Property source is managed by the Nacos server plugin runtime. Default no-op keeps backward
+     * compatibility for existing SPI implementations. The server does not invoke this callback when
+     * the service declares configurable items; those services are initialized through unified plugin
+     * configuration.</p>
      *
      * @param properties service-specific properties
+     * @deprecated declare configuration definitions and use the unified configuration lifecycle
+     *     instead. Planned for removal in Nacos 4.0.0.
      */
+    @Deprecated
     default void init(Properties properties) {
     }
     
@@ -47,7 +53,7 @@ public interface VisibilityService {
      *
      * @param identity     current identity
      * @param apiType      current api type
-     * @param resourceType resource type, such as skill / agentspec
+     * @param resourceType domain-specific resource type
      * @return default scope for new resource
      */
     default String resolveDefaultScopeForCreate(String identity, String apiType,

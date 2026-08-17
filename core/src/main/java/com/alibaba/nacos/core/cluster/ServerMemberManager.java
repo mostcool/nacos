@@ -36,7 +36,6 @@ import com.alibaba.nacos.common.notify.listener.Subscriber;
 import com.alibaba.nacos.common.utils.ConcurrentHashSet;
 import com.alibaba.nacos.common.utils.ExceptionUtil;
 import com.alibaba.nacos.common.utils.JacksonUtils;
-import com.alibaba.nacos.common.utils.StringUtils;
 import com.alibaba.nacos.common.utils.VersionUtils;
 import com.alibaba.nacos.core.ability.ServerAbilityInitializer;
 import com.alibaba.nacos.core.ability.ServerAbilityInitializerHolder;
@@ -54,9 +53,9 @@ import com.alibaba.nacos.sys.env.Constants;
 import com.alibaba.nacos.sys.env.EnvUtil;
 import com.alibaba.nacos.sys.utils.ApplicationUtils;
 import com.alibaba.nacos.sys.utils.InetUtils;
+import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Component;
 
-import javax.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -159,6 +158,8 @@ public class ServerMemberManager implements NacosMemberManager {
         this.self.setExtendVal(MemberMetaDataConstants.VERSION, VersionUtils.version);
         //works  for gray model upgrade,can delete after compatibility period.
         this.self.setExtendVal(MemberMetaDataConstants.SUPPORT_GRAY_MODEL, true);
+        // Temporary capability used to finish the JRaft authentication rolling upgrade.
+        this.self.setExtendVal(MemberMetaDataConstants.SUPPORT_JRAFT_AUTH, true);
         this.self.setGrpcReportEnabled(true);
         
         // init abilities.
@@ -293,9 +294,12 @@ public class ServerMemberManager implements NacosMemberManager {
             return true;
         }
         
-        // If only IP information is passed in, a fuzzy match is required
-        for (Map.Entry<String, Member> entry : serverList.entrySet()) {
-            if (StringUtils.contains(entry.getKey(), address)) {
+        // If only the IP is passed in (without port), match members by IP exactly.
+        // Comparing the member IP avoids IPv4 prefix collisions (e.g. "192.168.1.10"
+        // wrongly matching "192.168.1.100:8848") as well as IPv6 parsing pitfalls from
+        // naive ":" splitting (e.g. "[::1]:8848").
+        for (Member member : serverList.values()) {
+            if (address.equals(member.getIp())) {
                 result = true;
                 break;
             }

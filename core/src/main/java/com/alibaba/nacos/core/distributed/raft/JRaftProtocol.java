@@ -23,8 +23,6 @@ import com.alibaba.nacos.common.notify.Event;
 import com.alibaba.nacos.common.utils.MapUtil;
 import com.alibaba.nacos.common.utils.ThreadUtils;
 import com.alibaba.nacos.consistency.ProtocolMetaData;
-import com.alibaba.nacos.consistency.SerializeFactory;
-import com.alibaba.nacos.consistency.Serializer;
 import com.alibaba.nacos.consistency.cp.CPProtocol;
 import com.alibaba.nacos.consistency.cp.RequestProcessor4CP;
 import com.alibaba.nacos.consistency.cp.MetadataKey;
@@ -33,8 +31,10 @@ import com.alibaba.nacos.consistency.entity.Response;
 import com.alibaba.nacos.consistency.entity.WriteRequest;
 import com.alibaba.nacos.core.cluster.Member;
 import com.alibaba.nacos.core.cluster.ServerMemberManager;
+import com.alibaba.nacos.core.distributed.raft.auth.JRaftAuthUpgradeCoordinator;
 import com.alibaba.nacos.core.distributed.AbstractConsistencyProtocol;
 import com.alibaba.nacos.core.distributed.raft.exception.NoSuchRaftGroupException;
+import com.alibaba.nacos.core.monitor.MetricsMonitor;
 import com.alibaba.nacos.core.utils.Loggers;
 import com.alipay.sofa.jraft.Node;
 
@@ -97,8 +97,6 @@ public class JRaftProtocol extends AbstractConsistencyProtocol<RaftConfig, Reque
     
     private final AtomicBoolean shutdowned = new AtomicBoolean(false);
     
-    private final Serializer serializer = SerializeFactory.getDefault();
-    
     private RaftConfig raftConfig;
     
     private JRaftServer raftServer;
@@ -107,9 +105,10 @@ public class JRaftProtocol extends AbstractConsistencyProtocol<RaftConfig, Reque
     
     private ServerMemberManager memberManager;
     
-    public JRaftProtocol(ServerMemberManager memberManager) throws Exception {
+    public JRaftProtocol(ServerMemberManager memberManager,
+        JRaftAuthUpgradeCoordinator jRaftAuthUpgradeCoordinator) throws Exception {
         this.memberManager = memberManager;
-        this.raftServer = new JRaftServer();
+        this.raftServer = new JRaftServer(jRaftAuthUpgradeCoordinator);
         this.jRaftMaintainService = new JRaftMaintainService(raftServer);
     }
     
@@ -143,6 +142,8 @@ public class JRaftProtocol extends AbstractConsistencyProtocol<RaftConfig, Reque
                     MapUtil.putIfValNoEmpty(properties, MetadataKey.RAFT_GROUP_MEMBER,
                         raftClusterInfo);
                     MapUtil.putIfValNoEmpty(properties, MetadataKey.ERR_MSG, errMsg);
+                    MetricsMonitor.refreshRaftGroupMetrics(groupId, leader, term,
+                        raftConfig.getSelfMember());
                     
                     value.put(groupId, properties);
                     metaData.load(value);

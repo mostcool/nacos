@@ -57,6 +57,47 @@ Naming 同时区分两类元数据来源：
 | `preserved.ip.delete.timeout` | 心跳删除超时覆盖值。 |
 | `preserved.instance.id.generator` | instance id 生成器选择。 |
 
+完整的 `__nacos.agent.endpoint.*__` 命名空间保留给 Agent Runtime Endpoint 投影。
+Version 1 使用以下 key：
+
+| Key | 含义 |
+| --- | --- |
+| `__nacos.agent.endpoint.path__` | URI path。 |
+| `__nacos.agent.endpoint.transport__` | 规范 transport；必须与 Naming cluster 一致。 |
+| `__nacos.agent.endpoint.protocol__` | URI scheme，不是 Agent CallInterface protocol token。 |
+| `__nacos.agent.endpoint.protocolVersion__` | 可选的旧 A2A protocol-version 兼容事实。 |
+| `__nacos.agent.endpoint.supportTls__` | 投影 URI 是否使用 TLS。 |
+| `__nacos.agent.endpoint.query__` | 原始 URI query。 |
+| `__nacos.agent.endpoint.tenant__` | 存在时保存 protocol native tenant。 |
+| `__nacos.agent.endpoint.version__` | 该 Instance contribution 的 runtime Version。 |
+| `__nacos.agent.endpoint.versionRange__` | 该 Instance contribution 的 canonical Version range。 |
+| `__nacos.agent.endpoint.priority__` | Endpoint priority；数值越小优先级越高。 |
+
+只有 Agent Endpoint Naming Adapter 可以写入该前缀下的 key。公开 runtime 和 operational metadata
+写入必须拒绝这些 key，因此普通 operational-over-runtime 优先级规则不覆盖 Agent 投影事实。
+Endpoint weight、enabled 状态和健康状态继续使用 Naming Instance 原生字段，不使用保留
+metadata key。
+
+当前按 Version 划分的 A2A 兼容 Layout 可以写入 `protocolVersion`，新的 RAD 注册不写该值。
+公开 RAD Endpoint metadata 和 Runtime revision 都排除该值。反向投影旧 A2A 响应时优先使用
+该值；缺失时回退到目标 Agent CallInterface 的 `protocolVersion`。
+
+新的无 Version RAD Runtime Naming Instance 只携带一组 `version` 和 `versionRange`。
+Version range 必须是 canonical 形式，并且必须包含该 runtime Version。Naming metadata
+不存储序列化后的 bindings 数组。当前按 Version 划分的 A2A Naming Layout 不受此要求约束。
+
+注册遵循 Naming 完整 batch 覆盖语义。客户端维护同一连接对一个 Agent protocol service
+发布的完整 Endpoint batch，在本地移除或替换条目后，通过 Naming batch registration 提交剩余的
+完整 batch；如果本地计算后的期望 batch 为空，客户端调用整份 publication 注销，不向 Naming
+提交空 batch。服务端 Agent adapter 只把提交的 batch 映射为 Naming Instance，不读取和合并该
+publisher 的旧 batch。
+
+查询新的 RAD Runtime 时，读取方根据每个 Instance 的 singular pair 构造一个
+`RuntimeVersionBinding`，执行 Version range 匹配，并按 Endpoint natural key 聚合查询结果中的 `bindings[]`。
+`RuntimeVersionBinding` 和 `bindings[]` 属于查询投影，不属于 Naming 注册 metadata。精确的
+Runtime 投影规则由
+[Agent 存储规范](../ai/agent-storage-spec.md)定义。
+
 新的核心行为不得绑定到任意用户元数据 key。如果某个元数据 key 会改变 Naming 行为，必须被保留并
 写入文档。
 
@@ -95,6 +136,10 @@ Service metadata、cluster metadata 和 instance metadata 操作通过 CP metada
 可能在运行时 client 消失后临时存活。过期元数据清理会在所属 service 或 instance 脱离达到配置
 过期窗口后移除元数据。
 
+instance metadata 由 instance identity 标识，而非由发布它的 client 标识。client 断开本身并不
+代表 instance 脱离：同一个 instance 可能已被另一个 client 重新注册。因此清理前必须确认该
+instance 已不再注册于其 service，若 instance 仍在注册中，则应保留元数据并停止跟踪该过期记录。
+
 运行时元数据跟随运行时 publisher 生命周期。运维态元数据跟随元数据持久化路径，并可以在恢复后
 覆盖运行时元数据。
 
@@ -109,5 +154,6 @@ Service metadata、cluster metadata 和 instance metadata 操作通过 CP metada
 - [Naming 资源规范](naming-resource-spec.md)
 - [Naming 健康检查与保护规范](naming-health-protection-spec.md)
 - [Naming 一致性与客户端状态规范](naming-consistency-client-spec.md)
+- [Agent 存储规范](../ai/agent-storage-spec.md)
 - [事件分发与 NotifyCenter 规范](../design/foundation-event-dispatch-spec.md)
 - [兼容与废弃策略规范](../design/compatibility-deprecation-spec.md)

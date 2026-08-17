@@ -33,6 +33,13 @@ public class Constants {
     
     public static final String AI_RESOURCE_IMPORT_CONSOLE_PATH = "/v3/console/ai/import";
     
+    public static final String ARD_ENABLED_KEY = "nacos.ai.ard.enabled";
+    
+    /**
+     * Selects the default AI Resource storage provider for new writes.
+     */
+    public static final String AI_STORAGE_PROVIDER_CONFIG_KEY = "nacos.ai.storage.provider";
+    
     public static final String MCP_LIST_SEARCH_ACCURATE = "accurate";
     
     public static final String MCP_LIST_SEARCH_BLUR = "blur";
@@ -112,27 +119,60 @@ public class Constants {
         
         public static final String SEARCH_ACCURATE = "accurate";
         
+    }
+    
+    public static class Agent {
+        
+        public static final String CLIENT_PATH = "/v3/client/ai/agents";
+        
+        public static final String CONSOLE_PATH = "/v3/console/ai/agents";
+        
+        public static final String ADMIN_PATH = "/v3/admin/ai/agents";
+        
+        /**
+         * Resource type stored in {@code ai_resource} and {@code ai_resource_version}.
+         */
+        public static final String RESOURCE_TYPE_AGENT = "agent";
+        
+        /**
+         * Compatibility override for the Agent storage provider.
+         */
+        public static final String AGENT_STORAGE_PROVIDER_CONFIG_KEY =
+            "nacos.ai.agent.storage.provider";
+        
         public static final String AGENT_ENDPOINT_GROUP = "agent-endpoints";
         
-        public static final String AGENT_ENDPOINT_PATH_KEY = "__nacos.agent.endpoint.path__";
+        public static final String AGENT_ENDPOINT_METADATA_PREFIX = "__nacos.agent.endpoint.";
+        
+        public static final String AGENT_ENDPOINT_PATH_KEY =
+            AGENT_ENDPOINT_METADATA_PREFIX + "path__";
         
         public static final String AGENT_ENDPOINT_TRANSPORT_KEY =
-            "__nacos.agent.endpoint.transport__";
+            AGENT_ENDPOINT_METADATA_PREFIX + "transport__";
         
-        public static final String NACOS_AGENT_ENDPOINT_SUPPORT_TLS =
-            "__nacos.agent.endpoint.supportTls__";
+        public static final String AGENT_ENDPOINT_PROTOCOL_KEY =
+            AGENT_ENDPOINT_METADATA_PREFIX + "protocol__";
         
-        public static final String NACOS_AGENT_ENDPOINT_PROTOCOL_KEY =
-            "__nacos.agent.endpoint.protocol__";
+        public static final String AGENT_ENDPOINT_PROTOCOL_VERSION_KEY =
+            AGENT_ENDPOINT_METADATA_PREFIX + "protocolVersion__";
         
-        public static final String NACOS_AGENT_ENDPOINT_QUERY_KEY =
-            "__nacos.agent.endpoint.query__";
+        public static final String AGENT_ENDPOINT_SUPPORT_TLS_KEY =
+            AGENT_ENDPOINT_METADATA_PREFIX + "supportTls__";
         
-        public static final String NACOS_AGENT_ENDPOINT_PROTOCOL_VERSION_KEY =
-            "__nacos.agent.endpoint.protocolVersion__";
+        public static final String AGENT_ENDPOINT_QUERY_KEY =
+            AGENT_ENDPOINT_METADATA_PREFIX + "query__";
         
-        public static final String NACOS_AGENT_ENDPOINT_TENANT_KEY =
-            "__nacos.agent.endpoint.tenant__";
+        public static final String AGENT_ENDPOINT_TENANT_KEY =
+            AGENT_ENDPOINT_METADATA_PREFIX + "tenant__";
+        
+        public static final String AGENT_ENDPOINT_VERSION_KEY =
+            AGENT_ENDPOINT_METADATA_PREFIX + "version__";
+        
+        public static final String AGENT_ENDPOINT_VERSION_RANGE_KEY =
+            AGENT_ENDPOINT_METADATA_PREFIX + "versionRange__";
+        
+        public static final String AGENT_ENDPOINT_PRIORITY_KEY =
+            AGENT_ENDPOINT_METADATA_PREFIX + "priority__";
     }
     
     public static class Skills {
@@ -152,6 +192,29 @@ public class Constants {
         public static final String SEARCH_ACCURATE = "accurate";
         
         public static final String SKILL_DEFAULT_NAMESPACE = "public";
+        
+        public static final String SKILL_STORAGE_PROVIDER_CONFIG_KEY =
+            "nacos.ai.skill.storage.provider";
+        
+        /**
+         * Resource type constant used in {@code ai_resource_version.type} for skill rows.
+         */
+        public static final String RESOURCE_TYPE_SKILL = "skill";
+        
+        /**
+         * Key inside {@code ai_resource_version.storage} JSON for the published content MD5.
+         */
+        public static final String STORAGE_KEY_CONTENT_MD5 = "contentMd5";
+        
+        /**
+         * Response header carrying the published skill content MD5 for client listener cache.
+         */
+        public static final String HEADER_SKILL_MD5 = "X-Nacos-Skill-Md5";
+        
+        /**
+         * Response header carrying the resolved version when the client queries by label.
+         */
+        public static final String HEADER_SKILL_RESOLVED_VERSION = "X-Nacos-Skill-Resolved-Version";
         
         /**
          * Default max allowed size for skill zip upload (10MB).
@@ -198,6 +261,11 @@ public class Constants {
         public static final String SEARCH_ACCURATE = "accurate";
         
         public static final String AGENTSPEC_DEFAULT_NAMESPACE = "public";
+        
+        public static final String HEADER_AGENTSPEC_MD5 = "X-Nacos-AgentSpec-Md5";
+        
+        public static final String HEADER_AGENTSPEC_RESOLVED_VERSION =
+            "X-Nacos-AgentSpec-Resolved-Version";
     }
     
     public static class Pipeline {
@@ -271,6 +339,9 @@ public class Constants {
          * Default namespace for prompt.
          */
         public static final String PROMPT_DEFAULT_NAMESPACE = "public";
+        
+        public static final String PROMPT_STORAGE_PROVIDER_CONFIG_KEY =
+            "nacos.ai.prompt.storage.provider";
         
         /**
          * Config type for prompt.

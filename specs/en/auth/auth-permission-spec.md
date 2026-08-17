@@ -133,6 +133,18 @@ handler to the auth model.
 | `tags` | Additional metadata copied into `Resource.properties`. |
 | `apiType` | API audience and auth scope. |
 
+Resource parsing uses the following precedence:
+
+1. A non-empty `resource` is converted directly to a `SPECIFIED` resource.
+2. A non-default method-level `parser` parses the request while preserving the
+   declared `signType` and `apiType`.
+3. Otherwise, the protocol selects its typed parser from `signType`.
+4. If no typed parser exists, `DefaultResourceParser` returns an empty resource.
+
+An explicitly selected parser must not silently fall back to an empty resource
+when construction or parsing fails. Such failures are request-processing
+errors, because continuing with a broader resource could weaken authorization.
+
 Every non-public v3 HTTP API and gRPC request handler must declare the intended
 auth metadata. Public endpoints must be explicitly documented by their owning
 spec.
@@ -153,6 +165,12 @@ The common auth flow is:
 
 Server-internal requests may also require the configured server identity key and
 value before normal request handling continues.
+
+JRaft native gRPC is such a server-internal transport even though it does not
+use a Nacos `RequestHandler`. Its client transports server identity through
+gRPC `CallCredentials`, and its server validates the identity in a
+`ServerInterceptor`. Public Open API auth being disabled must not bypass JRaft
+server identity after the cluster has entered enforced mode.
 
 ## Resource Permission Names
 
@@ -187,7 +205,8 @@ Auth enablement is scoped by API audience:
 | `nacos.core.auth.admin.enabled` | Enables auth for Admin APIs. |
 | `nacos.core.auth.console.enabled` | Enables auth for Console APIs and login behavior. |
 
-The selected auth plugin is named by `nacos.core.auth.system.type`.
+The selected auth plugin is named by `nacos.plugin.auth.type`.
+`nacos.core.auth.system.type` remains a legacy startup alias.
 
 ## Plugin APIs
 

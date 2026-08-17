@@ -551,6 +551,31 @@ class McpServerOperationServiceTest {
     }
     
     @Test
+    void getMcpServerDetailWithoutVersionUsesLatestPublishedVersion() throws NacosException {
+        String id = mockId();
+        McpServerVersionInfo versionInfo = mockServerVersionInfo(id);
+        versionInfo.setLatestPublishedVersion("1.0.1");
+        versionInfo.setVersions(List.of(mockVersion("1.0.1"), mockVersion("1.0.3")));
+        McpServerStorageInfo storageInfo =
+            mockStorageInfo(id, false, false, AiConstants.Mcp.MCP_PROTOCOL_STDIO);
+        storageInfo.setVersion("1.0.1");
+        storageInfo.setVersionDetail(mockVersion("1.0.1"));
+        when(configQueryChainService.handle(any(ConfigQueryChainRequest.class))).thenReturn(
+            mockConfigQueryChainResponse(versionInfo), mockConfigQueryChainResponse(storageInfo));
+        
+        McpServerDetailInfo actual =
+            serverOperationService.getMcpServerDetail(AiConstants.Mcp.MCP_DEFAULT_NAMESPACE,
+                id, null, null);
+        
+        assertEquals("1.0.1", actual.getVersion());
+        ArgumentCaptor<ConfigQueryChainRequest> requestCaptor =
+            ArgumentCaptor.forClass(ConfigQueryChainRequest.class);
+        verify(configQueryChainService, times(2)).handle(requestCaptor.capture());
+        assertEquals(McpConfigUtils.formatServerSpecInfoDataId(id, "1.0.1"),
+            requestCaptor.getAllValues().get(1).getDataId());
+    }
+    
+    @Test
     void getMcpServerDetailByIdNotFoundWithVersion() throws NacosException {
         String id = mockId();
         ConfigQueryChainResponse versionDataResponse =
@@ -1018,7 +1043,7 @@ class McpServerOperationServiceTest {
         assertTrue(allArgs.contains("mcpName::9.9.9"), "Missing deletion call for version 9.9.9");
         
         String serverVersionDataId = McpConfigUtils.formatServerVersionInfoDataId(id);
-        verify(configOperationService, times(2)).deleteConfig(serverVersionDataId,
+        verify(configOperationService, times(1)).deleteConfig(serverVersionDataId,
             Constants.MCP_SERVER_VERSIONS_GROUP,
             AiConstants.Mcp.MCP_DEFAULT_NAMESPACE, null, null, "nacos", null);
         verify(mcpServerIndex, times(0))
@@ -1064,7 +1089,7 @@ class McpServerOperationServiceTest {
             .removeMcpServerByName(AiConstants.Mcp.MCP_DEFAULT_NAMESPACE, "mcpName");
         verify(mcpServerIndex, times(0)).removeMcpServerById(null);
         String serverVersionDataId = McpConfigUtils.formatServerVersionInfoDataId(id);
-        verify(configOperationService, times(2)).deleteConfig(serverVersionDataId,
+        verify(configOperationService, times(1)).deleteConfig(serverVersionDataId,
             Constants.MCP_SERVER_VERSIONS_GROUP,
             AiConstants.Mcp.MCP_DEFAULT_NAMESPACE, null, null, "nacos", null);
         for (ServerVersionDetail each : mockServerVersionInfo(id).getVersionDetails()) {
@@ -1095,9 +1120,21 @@ class McpServerOperationServiceTest {
             AiConstants.Mcp.MCP_DEFAULT_NAMESPACE,
             "mcpName::1.0.0");
         String serverVersionDataId = McpConfigUtils.formatServerVersionInfoDataId(id);
-        verify(configOperationService).deleteConfig(serverVersionDataId,
-            Constants.MCP_SERVER_VERSIONS_GROUP,
-            AiConstants.Mcp.MCP_DEFAULT_NAMESPACE, null, null, "nacos", null);
+        verify(configOperationService, never()).deleteConfig(eq(serverVersionDataId),
+            eq(Constants.MCP_SERVER_VERSIONS_GROUP),
+            eq(AiConstants.Mcp.MCP_DEFAULT_NAMESPACE), isNull(), isNull(), eq("nacos"),
+            isNull());
+        ArgumentCaptor<ConfigFormV3> configCaptor = ArgumentCaptor.forClass(ConfigFormV3.class);
+        verify(configOperationService).publishConfig(configCaptor.capture(),
+            any(ConfigRequestInfo.class), isNull());
+        assertEquals(serverVersionDataId, configCaptor.getValue().getDataId());
+        
+        McpServerVersionInfo updatedVersionInfo =
+            JacksonUtils.toObj(configCaptor.getValue().getContent(), McpServerVersionInfo.class);
+        assertEquals("9.9.9", updatedVersionInfo.getLatestPublishedVersion());
+        assertEquals(1, updatedVersionInfo.getVersionDetails().size());
+        assertEquals("9.9.9", updatedVersionInfo.getVersionDetails().get(0).getVersion());
+        assertTrue(updatedVersionInfo.getVersionDetails().get(0).getIs_latest());
         verify(toolOperationService).deleteMcpTool(AiConstants.Mcp.MCP_DEFAULT_NAMESPACE, id,
             "1.0.0");
         verify(resourceOperationService).deleteMcpResource(AiConstants.Mcp.MCP_DEFAULT_NAMESPACE,

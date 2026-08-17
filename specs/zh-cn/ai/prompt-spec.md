@@ -47,7 +47,8 @@ Prompt 遵循共享的 [AI 资源生命周期规范](ai-resource-lifecycle-spec.
 
 - 从新内容或已有版本创建 draft；
 - 更新或删除当前 draft；
-- 提交到发布流水线，或在无匹配流水线时直接发布；
+- 提交 draft 或 reviewed 版本到发布流水线，或在无匹配流水线时直接发布；提交
+  reviewing 版本按幂等调用返回；
 - 发布、强制发布、上线/下线、更新 labels、更新描述、更新业务标签和删除；
 - 通过明确 version、label 或 `latest` 查询。
 
@@ -60,7 +61,13 @@ Prompt。如果 md5 与当前版本内容 md5 一致，服务端可以返回 not
 
 订阅应报告 Prompt 变更，但不应向运行时客户端暴露宽范围管理列表能力。
 
-## 5. 迁移
+## 5. 存储
+
+Prompt 在每个版本的存储描述中持久化选定的 provider。已有版本的操作使用已持久化的
+provider，有效 provider 配置仅作用于新版本。缺少 provider 的历史描述使用
+`nacos_config`。
+
+## 6. 迁移
 
 Prompt 存在从旧 Prompt 存储迁移到
 `ai_resource + ai_resource_version + AI storage` 的迁移任务。迁移必须：
@@ -70,7 +77,7 @@ Prompt 存在从旧 Prompt 存储迁移到
 - 尽可能保留已有版本和 latest 行为；
 - 将旧映射保持为兼容存储，而不是正式 Config 语义。
 
-## 6. 演进说明
+## 7. 演进说明
 
 Prompt 格式、变量 schema、tool-call 约定和模型提供方要求可能快速变化。Prompt 规范
 调整可以引入新的内容字段或校验规则，但必须为已有 Prompt 保留版本化迁移路径。

@@ -45,6 +45,11 @@ and resource references before writing a version.
 AgentSpec uses the standard `ai_resource` and `ai_resource_version` model. It
 uses AI storage for `manifest.json` and resource files.
 
+Each version descriptor persists its selected storage provider. Reads, draft
+replacements, and deletes use that persisted provider, while the effective
+provider configuration selects only new versions. A legacy descriptor without
+a provider uses `nacos_config`.
+
 Unlike Skill, AgentSpec does not maintain a separate manifest index. Version
 metadata and storage pointers are authoritative.
 
@@ -54,7 +59,8 @@ AgentSpec follows the shared [AI Resource Lifecycle Spec](ai-resource-lifecycle-
 
 - upload or create draft;
 - update draft;
-- submit through publish pipeline or direct publish;
+- submit a draft or reviewed version through publish pipeline or direct publish,
+  and submit a reviewing version idempotently;
 - publish, force publish, update labels, update business tags, update scope,
   online/offline, and delete.
 
@@ -68,6 +74,42 @@ latest. Subscriptions should notify clients when the resolved AgentSpec changes.
 
 Runtime clients should not receive upload, publish, force publish, delete, or
 broad management listing operations.
+
+### 5.1 Client Listener Protocol
+
+The client uses HTTP polling with a conditional query (MD5-based ETag) to detect
+content changes without downloading the full payload every cycle.
+
+- **Polling interval**: configurable via `nacosAiAgentSpecCacheUpdateInterval`;
+  default 10 000 ms.
+- **Request**: `GET /v3/client/ai/agentspecs?namespaceId=&name=&md5=<cached-md5>`.
+- **304 Not Modified**: server compares the request MD5 against the stored
+  `contentMd5` (computed at publish time). If they match the server returns
+  HTTP 304 with an `ETag` header; the client keeps its local cache unchanged.
+- **200 OK**: the response carries `Result<AgentSpec>` JSON with response headers
+  `X-Nacos-AgentSpec-Md5` and `X-Nacos-AgentSpec-Resolved-Version`. The client
+  updates its local cache and md5Cache, then publishes an
+  `AgentSpecChangedEvent`.
+- **Legacy backfill**: for versions published before the contentMd5 field
+  existed, the server lazily computes and stores the MD5 on the first
+  conditional query.
+
+### 5.2 Authorization Resource Resolution
+
+AgentSpec HTTP APIs use the plural `/ai/agentspecs` path segment and retain
+their declared `AI` sign type and API type while resolving the authorization
+resource:
+
+- regular Admin and Console operations resolve the resource name from
+  `agentSpecName`;
+- `GET .../agentspecs/list` is a namespace-range operation and therefore does
+  not resolve a single resource name; row visibility is enforced by the
+  visibility plugin;
+- `PUT .../agentspecs/draft` resolves the authoritative target from
+  `agentSpecCard.name`, because `agentSpecName` is optional and the card is the
+  object written by the service;
+- `GET /v3/client/ai/agentspecs` resolves the resource from the client `name`
+  parameter.
 
 ## 6. Evolution Note
 

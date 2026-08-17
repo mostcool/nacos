@@ -53,6 +53,11 @@ public interface ConfigInfoPersistService {
     /**
      * Generate fuzzy search Sql.
      *
+     * <p>The returned value is bound to a {@code LIKE} predicate that declares {@code ESCAPE '\'} on the
+     * dialects without a default escape character, so implementations MUST escape the escape character
+     * itself before escaping {@code _}. Otherwise a literal backslash in {@code s} starts an invalid
+     * escape sequence and the database rejects the query.</p>
+     *
      * @param s origin string
      * @return fuzzy search Sql
      */
@@ -401,7 +406,9 @@ public interface ConfigInfoPersistService {
      * @param group  group
      * @param tenant tenant
      * @return advance info
+     * @deprecated Unused by current config flows; kept temporarily for repository compatibility.
      */
+    @Deprecated
     ConfigAdvanceInfo findConfigAdvanceInfo(final String dataId, final String group,
         final String tenant);
     

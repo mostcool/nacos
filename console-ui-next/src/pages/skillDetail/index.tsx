@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState, useMemo, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import Markdown from 'react-markdown';
@@ -31,6 +31,8 @@ import {
   Loader2,
   ShieldAlert,
   MessageSquare,
+  GitCompareArrows,
+  Copy,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -75,6 +77,7 @@ import { cn } from '@/lib/utils';
 import {
   hasNonFrontmatterMarkdownBody,
   parseFrontmatter,
+  prepareSkillMarkdownPreview,
   updateFrontmatterField,
 } from '@/lib/markdown-utils';
 import dayjs from 'dayjs';
@@ -85,19 +88,38 @@ import { SkillOptimizeDialog } from '@/components/ai/skill/SkillOptimizeDialog';
 import { LabelBindDialog } from '@/components/ai/LabelBindDialog';
 import { BizTagEditDialog } from '@/components/ai/BizTagEditDialog';
 import { DetailTagChip } from '@/components/ai/DetailTagChip';
+import { canResubmitReview } from '@/components/ai/version-lifecycle';
 import { CliCommandCard } from '@/components/ai/CliCommandCard';
+import { VisibilityAuthorizationDialog } from '@/components/ai/VisibilityAuthorizationDialog';
 import { sortVersionsDescending } from '../skillManagement/components/version-utils';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { SkillResourcePanel } from './SkillResourcePanel';
+import { SkillVersionDiffPanel } from './SkillVersionDiffPanel';
+
+function renderSkillMarkdownPreview(source: string) {
+  return (
+    <MDEditor.Markdown
+      source={prepareSkillMarkdownPreview(source)}
+      remarkPlugins={[remarkGfm, remarkFrontmatter]}
+    />
+  );
+}
+
+const skillMarkdownEditorComponents = { preview: renderSkillMarkdownPreview };
 
 export default function SkillDetailPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { name: routeName } = useParams<{ name: string }>();
   const skillName = routeName ? decodeURIComponent(routeName) : '';
   const { currentNamespace } = useNamespaceStore();
-  const namespaceId = currentNamespace || 'public';
-  const { globalAdmin } = useAuthStore();
+  const namespaceId =
+    searchParams.get('namespaceId') ||
+    searchParams.get('namespace') ||
+    currentNamespace ||
+    'public';
+  const { globalAdmin, username } = useAuthStore();
   const copilotEnabled = useServerStore((s) => s.copilotEnabled);
 
   const {
@@ -114,6 +136,7 @@ export default function SkillDetailPage() {
   const [selectedVersion, setSelectedVersion] = useState<string>('');
   const [versionDoc, setVersionDoc] = useState<SkillDocument | null>(null);
   const [docLoading, setDocLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
 
   // Ref to prevent circular updates between description textarea and md editor frontmatter
   const syncSourceRef = useRef<'description' | 'instruction' | null>(null);
@@ -158,6 +181,7 @@ export default function SkillDetailPage() {
   // Enable/disable toggle state
   const [enableToggling, setEnableToggling] = useState(false);
   const [scopeToggling, setScopeToggling] = useState(false);
+  const [visibilityDialogOpen, setVisibilityDialogOpen] = useState(false);
   const [bizTags, setBizTags] = useState<string[]>([]);
   const [bizTagDialogOpen, setBizTagDialogOpen] = useState(false);
 
@@ -215,6 +239,12 @@ export default function SkillDetailPage() {
     setBizTags(parseBizTags(currentDetail?.bizTags));
   }, [currentDetail?.bizTags]);
 
+  useEffect(() => {
+    if (isEditingDraft && activeTab === 'diff') {
+      setActiveTab('overview');
+    }
+  }, [activeTab, isEditingDraft]);
+
   // Load version document when selected version changes
   useEffect(() => {
     if (!selectedVersion || !skillName) {
@@ -253,6 +283,7 @@ export default function SkillDetailPage() {
   // ===== Draft editing handlers =====
 
   const handleStartEdit = () => {
+    setActiveTab('overview');
     setEditInstruction(versionDoc?.skillMd ?? '');
     setEditDescription(versionDoc?.description ?? '');
     setEditResources({ ...(versionDoc?.resource ?? {}) });
@@ -425,6 +456,7 @@ export default function SkillDetailPage() {
   const handleCreateDraft = async (basedOnVersion?: string) => {
     if (!basedOnVersion) {
       // No version to fork from — enter edit mode for a brand-new draft
+      setActiveTab('overview');
       setEditDescription('');
       setEditInstruction('');
       setEditResources({});
@@ -464,6 +496,7 @@ export default function SkillDetailPage() {
       if (updated?.editingVersion) {
         setSelectedVersion(updated.editingVersion);
       }
+      setActiveTab('overview');
     } catch {
       await loadDetail();
     } finally {
@@ -516,7 +549,6 @@ export default function SkillDetailPage() {
         namespaceId,
         skillName,
         version,
-        updateLatestLabel: true,
       });
       toast.success(t('skill.publishSuccess'));
       await loadDetail();
@@ -534,7 +566,6 @@ export default function SkillDetailPage() {
         namespaceId,
         skillName,
         version,
-        updateLatestLabel: true,
       });
       toast.success(t('skill.forcePublishSuccess'));
       await loadDetail();
@@ -559,6 +590,7 @@ export default function SkillDetailPage() {
       setEditResources({ ...(doc?.resource ?? {}) });
       setDraftCommitMsg('');
       setIsEditingDraft(true);
+      setActiveTab('overview');
     } catch {
       await loadDetail();
     } finally {
@@ -607,6 +639,24 @@ export default function SkillDetailPage() {
       // handled by axios interceptor
     }
   };
+
+  const skillMdContent = isEditingDraft ? editInstruction : versionDoc?.skillMd ?? '';
+  const hasSkillMdContent = skillMdContent.length > 0;
+
+  const handleCopySkillMd = useCallback(async () => {
+    if (!hasSkillMdContent) return;
+    try {
+      await navigator.clipboard.writeText(skillMdContent);
+      toast.success(t('skill.resourceCopySuccess'));
+    } catch {
+      toast.error(t('skill.resourceCopyFailed'));
+    }
+  }, [hasSkillMdContent, skillMdContent, t]);
+
+  const handleDownloadSkillMd = useCallback(() => {
+    if (!hasSkillMdContent) return;
+    downloadTextFile('SKILL.md', skillMdContent);
+  }, [hasSkillMdContent, skillMdContent]);
 
   const handleSelectVersion = (version: string) => {
     setSelectedVersion(version);
@@ -696,10 +746,14 @@ export default function SkillDetailPage() {
 
   // Pipeline info for current version
   const currentPipelineInfo = parsePipelineInfo(currentVersionSummary?.publishPipelineInfo);
+  const showResubmitReview = canResubmitReview(currentVersionStatus, currentPipelineInfo);
 
   // Parse resources from version document
   const resources = versionDoc?.resource ?? {};
   const resourceEntries = Object.entries(resources);
+  const showVersionDiff = !isEditingDraft && versions.length >= 2;
+  const canManageVisibility = globalAdmin || detail.owner === username;
+  const canWriteResource = detail.writable;
 
   return (
     <div className="space-y-5 pb-5">
@@ -800,7 +854,7 @@ export default function SkillDetailPage() {
                 <label className="inline-flex items-center gap-2 cursor-pointer select-none">
                   <Switch
                     checked={detail.enable}
-                    disabled={enableToggling}
+                    disabled={enableToggling || !canWriteResource}
                     onCheckedChange={handleToggleEnable}
                     className={cn(
                       detail.enable
@@ -819,7 +873,7 @@ export default function SkillDetailPage() {
                 <label className="inline-flex items-center gap-2 cursor-pointer select-none">
                   <Switch
                     checked={detail.scope === 'PUBLIC'}
-                    disabled={scopeToggling}
+                    disabled={scopeToggling || !canWriteResource}
                     onCheckedChange={handleToggleScope}
                   />
                   <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
@@ -827,6 +881,27 @@ export default function SkillDetailPage() {
                     {detail.scope === 'PUBLIC' ? t('skill.scopePublic') : t('skill.scopePrivate')}
                   </span>
                 </label>
+                {canManageVisibility && (
+                  <>
+                    <div className="h-4 w-px bg-border" />
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => setVisibilityDialogOpen(true)}
+                        >
+                          <ShieldAlert className="mr-1 h-3.5 w-3.5" />
+                          {t('common.visibilityAuthorization.entry')}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {t('common.visibilityAuthorization.title')}
+                      </TooltipContent>
+                    </Tooltip>
+                  </>
+                )}
               </div>
               {/* Description - editable in draft mode */}
               {isEditingDraft ? (
@@ -869,7 +944,7 @@ export default function SkillDetailPage() {
               </div>
 
               {/* Version lifecycle action buttons */}
-              {selectedVersion && currentVersionStatus && (
+              {canWriteResource && selectedVersion && currentVersionStatus && (
                 <div className="mt-3 pt-3 border-t border-border/40">
                   {!detail.enable && (
                     <p className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400 mb-2">
@@ -971,6 +1046,18 @@ export default function SkillDetailPage() {
                   {/* Reviewing / Reviewed actions */}
                   {(currentVersionStatus === 'reviewing' || currentVersionStatus === 'reviewed') && (
                     <>
+                      {showResubmitReview && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs gap-1.5"
+                          disabled={actionLoading}
+                          onClick={() => handleSubmit(selectedVersion)}
+                        >
+                          <Send className="h-3 w-3" />
+                          {t('skill.resubmit')}
+                        </Button>
+                      )}
                       <Button
                         size="sm"
                         className="h-7 text-xs gap-1.5"
@@ -1089,7 +1176,7 @@ export default function SkillDetailPage() {
               )}
 
               {/* Empty state: no versions, show create draft button or editing actions */}
-              {!selectedVersion && !detail.editingVersion && !detail.reviewingVersion && versions.length === 0 && (
+              {canWriteResource && !selectedVersion && !detail.editingVersion && !detail.reviewingVersion && versions.length === 0 && (
                 <div className="mt-3 pt-3 border-t border-border/40">
                   <div className="flex items-center gap-2">
                     {isCreatingNewDraft ? (
@@ -1134,7 +1221,7 @@ export default function SkillDetailPage() {
       </div>
 
       {/* ===== Tabs Content ===== */}
-      <Tabs defaultValue="overview" className={cn('flex flex-col', (detailLoading || actionLoading) && 'opacity-50 pointer-events-none')}>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className={cn('flex flex-col', (detailLoading || actionLoading) && 'opacity-50 pointer-events-none')}>
         <TabsList className="w-fit">
           <TabsTrigger value="overview" className="gap-1.5">
             <FileText className="h-3.5 w-3.5" />
@@ -1149,23 +1236,63 @@ export default function SkillDetailPage() {
               </Badge>
             )}
           </TabsTrigger>
+          {showVersionDiff && (
+            <TabsTrigger value="diff" className="gap-1.5">
+              <GitCompareArrows className="h-3.5 w-3.5" />
+              {t('skill.versionDiff')}
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* Overview tab: Instruction + Sidebar */}
         <TabsContent value="overview">
           <div
             className={cn(
-              'grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]',
-              isEditingDraft && 'max-lg:[&>div:first-child]:order-2 max-lg:[&>div:last-child]:order-1',
+              'grid grid-cols-1 gap-5',
+              !isEditingDraft && 'lg:grid-cols-[minmax(0,1fr)_320px]',
             )}
           >
             {/* Left: Instruction card */}
             <Card className="overflow-hidden py-0 gap-0 min-h-[580px]">
-              <div className="px-5 py-3.5 border-b bg-muted/30">
+              <div className="flex h-11 items-center justify-between gap-3 border-b bg-muted/30 px-5">
                 <h2 className="text-sm font-semibold flex items-center gap-2">
                   <FileText className="h-4 w-4 text-muted-foreground" />
                   {t('skill.skillMd')}
                 </h2>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground"
+                        onClick={handleCopySkillMd}
+                        disabled={!hasSkillMdContent}
+                        aria-label={t('skill.resourceCopyFile')}
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t('skill.resourceCopyFile')}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground"
+                        onClick={handleDownloadSkillMd}
+                        disabled={!hasSkillMdContent}
+                        aria-label={t('skill.resourceDownloadFile')}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t('skill.resourceDownloadFile')}</TooltipContent>
+                  </Tooltip>
+                </div>
               </div>
               <CardContent className="p-5">
                 {docLoading ? (
@@ -1177,15 +1304,29 @@ export default function SkillDetailPage() {
                 ) : isEditingDraft ? (
                   <div className="space-y-2">
                     <p className="text-xs text-muted-foreground">{t('skill.skillMdHint')}</p>
-                    <p className="text-[11px] text-muted-foreground rounded-md border bg-muted/20 px-3 py-2">
-                      {t('skill.commitMsgEditHint')}
-                    </p>
+                    <div className="space-y-1.5 rounded-md border bg-muted/20 p-3">
+                      <Label htmlFor="skill-draft-commit-msg" className="text-xs">
+                        {t('skill.commitMsg')}
+                      </Label>
+                      <Textarea
+                        id="skill-draft-commit-msg"
+                        value={draftCommitMsg}
+                        onChange={(e) => setDraftCommitMsg(e.target.value)}
+                        placeholder={t('skill.commitMsgPlaceholder')}
+                        className="min-h-[56px] resize-y bg-background text-xs"
+                        disabled={draftSaving}
+                      />
+                      <p className="text-[11px] leading-relaxed text-muted-foreground">
+                        {t('skill.commitMsgHint')}
+                      </p>
+                    </div>
                     <div data-color-mode="light" className="dark:hidden">
                       <MDEditor
                         value={editInstruction}
                         onChange={handleInstructionChange}
                         height={500}
                         preview="live"
+                        components={skillMarkdownEditorComponents}
                         previewOptions={{ remarkPlugins: [remarkGfm, remarkFrontmatter] }}
                       />
                     </div>
@@ -1195,6 +1336,7 @@ export default function SkillDetailPage() {
                         onChange={handleInstructionChange}
                         height={500}
                         preview="live"
+                        components={skillMarkdownEditorComponents}
                         previewOptions={{ remarkPlugins: [remarkGfm, remarkFrontmatter] }}
                       />
                     </div>
@@ -1202,7 +1344,7 @@ export default function SkillDetailPage() {
                 ) : versionDoc?.skillMd ? (
                   <div className="app-markdown prose prose-sm dark:prose-invert max-w-none">
                     <Markdown remarkPlugins={[remarkGfm, remarkFrontmatter]}>
-                      {versionDoc.skillMd}
+                      {prepareSkillMarkdownPreview(versionDoc.skillMd)}
                     </Markdown>
                   </div>
                 ) : (
@@ -1212,12 +1354,13 @@ export default function SkillDetailPage() {
             </Card>
 
             {/* Right: Sidebar */}
-            <div className="space-y-4 lg:w-[320px]">
-              <CliCommandCard
-                commands={currentVersionStatus !== 'draft' ? cliCommands : []}
-                onDownload={selectedVersion ? () => handleDownload(selectedVersion) : undefined}
-                downloadFileName={selectedVersion ? `${skillName}-${selectedVersion}.zip` : undefined}
-              />
+            {!isEditingDraft && (
+              <div className="space-y-4 lg:w-[320px]">
+                <CliCommandCard
+                  commands={currentVersionStatus !== 'draft' ? cliCommands : []}
+                  onDownload={selectedVersion ? () => handleDownload(selectedVersion) : undefined}
+                  downloadFileName={selectedVersion ? `${skillName}-${selectedVersion}.zip` : undefined}
+                />
 
               {/* Basic info card */}
               <Card className="overflow-hidden py-0 gap-0">
@@ -1242,37 +1385,22 @@ export default function SkillDetailPage() {
                     {currentVersionSummary && (
                       <InfoCell compact label={t('skill.versionDownloads')} value={String(currentVersionSummary.downloadCount ?? 0)} icon={<Download className="h-3.5 w-3.5" />} />
                     )}
-                    {(currentVersionSummary || isEditingDraft) && (
+                    {currentVersionSummary && (
                       <InfoCell
                         compact
                         colSpan={2}
                         label={t('skill.commitMsg')}
-                        value={
-                          isEditingDraft ? (
-                            <Textarea
-                              value={draftCommitMsg}
-                              onChange={(e) => setDraftCommitMsg(e.target.value)}
-                              placeholder={t('skill.commitMsgPlaceholder')}
-                              className="mt-0.5 min-h-[64px] max-w-full resize-y text-xs font-normal"
-                              disabled={draftSaving}
-                            />
-                          ) : (
-                            <span className="text-xs font-normal font-sans text-muted-foreground whitespace-pre-wrap">
-                              {currentVersionSummary?.commitMsg?.trim()
-                                ? currentVersionSummary.commitMsg
-                                : '-'}
-                            </span>
-                          )
-                        }
+                        value={(
+                          <span className="text-xs font-normal font-sans text-muted-foreground whitespace-pre-wrap">
+                            {currentVersionSummary.commitMsg?.trim()
+                              ? currentVersionSummary.commitMsg
+                              : '-'}
+                          </span>
+                        )}
                         icon={<MessageSquare className="h-3.5 w-3.5" />}
                       />
                     )}
                   </div>
-                  {isEditingDraft && (
-                    <p className="border-t border-border px-4 py-2 text-[11px] text-muted-foreground leading-relaxed">
-                      {t('skill.commitMsgHint')}
-                    </p>
-                  )}
                 </CardContent>
               </Card>
 
@@ -1351,8 +1479,8 @@ export default function SkillDetailPage() {
                   )}
                 </CardContent>
               </Card>
-
-            </div>
+              </div>
+            )}
           </div>
         </TabsContent>
 
@@ -1364,6 +1492,17 @@ export default function SkillDetailPage() {
             onChange={isEditingDraft ? setEditResources : undefined}
           />
         </TabsContent>
+
+        {showVersionDiff && (
+          <TabsContent value="diff" forceMount className="data-[state=inactive]:hidden">
+            <SkillVersionDiffPanel
+              namespaceId={namespaceId}
+              skillName={skillName}
+              versions={versions}
+              selectedVersion={selectedVersion}
+            />
+          </TabsContent>
+        )}
       </Tabs>
 
       <BizTagEditDialog
@@ -1476,9 +1615,10 @@ export default function SkillDetailPage() {
               onDownload={handleDownload}
               showCreateDraftButton
               allLabels={detail.labels}
-              onSaveLabels={handleSaveLabels}
+              onSaveLabels={canWriteResource ? handleSaveLabels : undefined}
               skillEnabled={detail.enable}
               isGlobalAdmin={globalAdmin}
+              canWrite={canWriteResource}
             />
           </div>
         </SheetContent>
@@ -1494,6 +1634,15 @@ export default function SkillDetailPage() {
           onApply={handleOptimizationApply}
         />
       )}
+
+      <VisibilityAuthorizationDialog
+        open={visibilityDialogOpen}
+        onOpenChange={setVisibilityDialogOpen}
+        namespaceId={namespaceId}
+        resourceType="skill"
+        resourceName={skillName}
+        onSuccess={loadDetail}
+      />
 
       {/* Force-publish confirmation dialog */}
       <Dialog open={forcePublishConfirmOpen} onOpenChange={setForcePublishConfirmOpen}>
@@ -1527,6 +1676,18 @@ export default function SkillDetailPage() {
       </Dialog>
     </div>
   );
+}
+
+function downloadTextFile(fileName: string, content: string) {
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 function parseSemver(version: string): { major: number; minor: number; patch: number } | null {
@@ -1625,6 +1786,7 @@ function StatusBadge({
   const statusStyles: Record<string, string> = {
     draft: 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',
     reviewing: 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300',
+    reviewed: 'bg-teal-50 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300',
     online: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300',
     offline: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400',
   };

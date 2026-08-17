@@ -44,7 +44,7 @@ still `resourceName`.
 | Field | Meaning |
 | --- | --- |
 | `namespaceId` | Namespace isolation boundary. |
-| `type` | Resource type, such as `prompt`, `skill`, or `agentspec`. |
+| `type` | Resource type, such as `agent`, `prompt`, `skill`, or `agentspec`. |
 | `name` | Stable resource name. |
 | `desc` | Resource description. |
 | `status` | Resource metadata status, currently `enable` or `disable`. |
@@ -105,9 +105,24 @@ The default storage implementation is Nacos Config based, but Config is only a
 storage backend here. AI resource content stored through `nacos_config` must not
 be treated as user-owned Config resources.
 
+Each version must persist its selected storage provider in
+`AiResourceVersion.storage`. The effective provider configuration selects the
+provider only when a new version is written. Reads, draft replacements, and
+deletes for an existing version must route through its persisted provider. A
+legacy storage descriptor without a provider belongs to `nacos_config`.
+
 Storage extension behavior is defined by the
 [AI Storage Plugin Spec](../plugin/ai-storage-plugin-spec.md). Database dialect
 behavior is defined by the [Data Source Dialect Plugin Spec](../plugin/datasource-dialect-plugin-spec.md).
+
+Type-owned JSON must have an explicit schema contract. For `type=agent`, `ext`
+contains the directory extension and derived online-version catalog, while the
+version `storage` points to one complete Agent version content object. Exact
+fields and rebuild rules are defined by the
+[Agent Management Spec](agent-management-spec.md) and the
+[Agent Storage Spec](agent-storage-spec.md). Runtime Agent endpoints are not
+stored in `AiResourceVersion.storage` because they follow a client-owned Naming
+lifecycle.
 
 ## 6. Visibility
 
@@ -123,6 +138,9 @@ Rules:
   scope mutation;
 - query operations should use visibility query advice instead of post-filtering
   large result sets whenever possible.
+- caller-supplied business filters such as owner and scope must be intersected
+  with visibility query advice before count and pagination; type implementations
+  must not overwrite visibility conditions after conversion.
 
 The extension contract is defined by the
 [Visibility Plugin Spec](../auth/visibility-plugin-spec.md).

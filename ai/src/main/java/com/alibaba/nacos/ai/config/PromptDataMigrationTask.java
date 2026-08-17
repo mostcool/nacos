@@ -16,11 +16,13 @@
 
 package com.alibaba.nacos.ai.config;
 
+import com.alibaba.nacos.ai.constant.Constants;
 import com.alibaba.nacos.ai.model.AiResource;
 import com.alibaba.nacos.ai.model.AiResourceVersion;
 import com.alibaba.nacos.ai.service.prompt.PromptOperationService;
 import com.alibaba.nacos.ai.service.repository.AiResourcePersistService;
 import com.alibaba.nacos.ai.service.repository.AiResourceVersionPersistService;
+import com.alibaba.nacos.ai.storage.AiResourceStorageUtils;
 import com.alibaba.nacos.ai.storage.NacosConfigAiResourceStorage;
 import com.alibaba.nacos.api.ai.model.prompt.PromptUtils;
 import com.alibaba.nacos.api.ai.model.prompt.PromptVersionInfo;
@@ -83,9 +85,6 @@ public class PromptDataMigrationTask implements ApplicationListener<ApplicationR
     private static final String META_STATUS_ENABLE = "enable";
     
     private static final String STORAGE_PROVIDER_NACOS_CONFIG = "nacos_config";
-    
-    private static final String PROMPT_STORAGE_PROVIDER_CONFIG_KEY =
-        "nacos.ai.prompt.storage.provider";
     
     private static final String MIGRATION_ENABLED_KEY = "nacos.ai.prompt.migration.enabled";
     
@@ -338,7 +337,8 @@ public class PromptDataMigrationTask implements ApplicationListener<ApplicationR
      * @param promptKey   prompt key
      * @param versions    version strings to clean up
      */
-    public void cleanupLegacyConfig(String namespaceId, String promptKey, List<String> versions) {
+    public void cleanupLegacyConfig(String namespaceId, String promptKey, List<String> versions)
+        throws NacosException {
         PromptLegacyDataReader reader = resolveLegacyDataReader();
         if (reader == null) {
             return;
@@ -348,6 +348,14 @@ public class PromptDataMigrationTask implements ApplicationListener<ApplicationR
     
     private void migrateOneVersion(String namespace, String promptKey, String version,
         PromptLegacyDataReader reader) throws Exception {
+        AiResourceVersion existing = aiResourceVersionPersistService.find(namespace, promptKey,
+            RESOURCE_TYPE_PROMPT, version);
+        if (existing != null) {
+            LOGGER.debug("Prompt '{}' version '{}' already in DB, skip migration", promptKey,
+                version);
+            return;
+        }
+        
         PromptVersionInfo versionInfo = reader.readVersionContent(namespace, promptKey, version);
         if (versionInfo == null) {
             LOGGER.warn("No content found for prompt '{}' version '{}', skip", promptKey, version);
@@ -364,16 +372,8 @@ public class PromptDataMigrationTask implements ApplicationListener<ApplicationR
             java.nio.charset.StandardCharsets.UTF_8.name());
         versionInfo.setMd5(md5);
         
-        // Write to typed storage FIRST (idempotent overwrite)
-        writeToTypedStorage(namespace, promptKey, version, versionInfo);
-        
-        // Then create DB record (idempotent: skip if exists)
-        AiResourceVersion existing = aiResourceVersionPersistService.find(namespace, promptKey,
-            RESOURCE_TYPE_PROMPT, version);
-        if (existing != null) {
-            LOGGER.debug("Prompt '{}' version '{}' already in DB, skip insert", promptKey, version);
-            return;
-        }
+        // Write to typed storage before publishing the matching version record.
+        String storageJson = writeToTypedStorage(namespace, promptKey, version, versionInfo);
         
         AiResourceVersion versionRecord = new AiResourceVersion();
         versionRecord.setNamespaceId(namespace);
@@ -384,7 +384,7 @@ public class PromptDataMigrationTask implements ApplicationListener<ApplicationR
         versionRecord.setAuthor(versionInfo.getSrcUser() != null ? versionInfo.getSrcUser() : "-");
         versionRecord.setDesc(versionInfo.getCommitMsg() != null ? versionInfo.getCommitMsg()
             : "migrated from legacy config");
-        versionRecord.setStorage(buildStorageJson(namespace, promptKey, version));
+        versionRecord.setStorage(storageJson);
         
         try {
             aiResourceVersionPersistService.insert(versionRecord);
@@ -457,7 +457,7 @@ public class PromptDataMigrationTask implements ApplicationListener<ApplicationR
         }
     }
     
-    private void writeToTypedStorage(String namespace, String promptKey, String version,
+    private String writeToTypedStorage(String namespace, String promptKey, String version,
         PromptVersionInfo versionInfo) throws NacosException {
         String provider = resolveStorageProvider();
         byte[] contentBytes = JacksonUtils.toJson(versionInfo).getBytes(StandardCharsets.UTF_8);
@@ -465,19 +465,21 @@ public class PromptDataMigrationTask implements ApplicationListener<ApplicationR
             NacosConfigAiResourceStorage.RESOURCE_TYPE_PROMPT, promptKey, version,
             PromptUtils.PROMPT_MAIN_DATA_ID);
         AiResourceStorageRouter.getInstance().route(storageKey).save(storageKey, contentBytes);
+        return buildStorageJson(namespace, promptKey, version, provider);
     }
     
-    private static String buildStorageJson(String namespace, String promptKey, String version) {
+    private static String buildStorageJson(String namespace, String promptKey, String version,
+        String provider) {
         Map<String, Object> json = new HashMap<>(4);
-        json.put("provider", resolveStorageProvider());
+        json.put("provider", provider);
         json.put("scope", namespace + ":" + promptKey + ":" + version);
         json.put("files", Collections.singletonList(PromptUtils.PROMPT_MAIN_DATA_ID));
         return JacksonUtils.toJson(json);
     }
     
     private static String resolveStorageProvider() {
-        String provider =
-            EnvUtil.getProperty(PROMPT_STORAGE_PROVIDER_CONFIG_KEY, STORAGE_PROVIDER_NACOS_CONFIG);
-        return StringUtils.isBlank(provider) ? STORAGE_PROVIDER_NACOS_CONFIG : provider.trim();
+        return AiResourceStorageUtils.resolveProvider(
+            Constants.Prompt.PROMPT_STORAGE_PROVIDER_CONFIG_KEY,
+            STORAGE_PROVIDER_NACOS_CONFIG);
     }
 }

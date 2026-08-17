@@ -19,18 +19,23 @@ package com.alibaba.nacos.client.ai;
 import com.alibaba.nacos.api.PropertyKeyConst;
 import com.alibaba.nacos.api.ai.AiService;
 import com.alibaba.nacos.api.ai.constant.AiConstants;
+import com.alibaba.nacos.api.ai.listener.AbstractNacosAgentDiscoveryListener;
 import com.alibaba.nacos.api.ai.listener.AbstractNacosAgentCardListener;
 import com.alibaba.nacos.api.ai.listener.AbstractNacosAgentSpecListener;
 import com.alibaba.nacos.api.ai.listener.AbstractNacosMcpServerListener;
 import com.alibaba.nacos.api.ai.listener.AbstractNacosPromptListener;
+import com.alibaba.nacos.api.ai.listener.AbstractNacosSkillListener;
 import com.alibaba.nacos.api.ai.listener.NacosAgentCardEvent;
 import com.alibaba.nacos.api.ai.listener.NacosAgentSpecEvent;
 import com.alibaba.nacos.api.ai.listener.NacosMcpServerEvent;
 import com.alibaba.nacos.api.ai.listener.NacosPromptEvent;
+import com.alibaba.nacos.api.ai.listener.NacosSkillEvent;
 import com.alibaba.nacos.api.ai.model.a2a.AgentCard;
 import com.alibaba.nacos.api.ai.model.a2a.AgentCardDetailInfo;
 import com.alibaba.nacos.api.ai.model.a2a.AgentEndpoint;
 import com.alibaba.nacos.api.ai.model.a2a.AgentInterface;
+import com.alibaba.nacos.api.ai.model.agent.AgentPublishRequest;
+import com.alibaba.nacos.api.ai.model.agent.AgentVersionDetail;
 import com.alibaba.nacos.api.ai.model.agentspecs.AgentSpec;
 import com.alibaba.nacos.api.ai.model.mcp.McpEndpointSpec;
 import com.alibaba.nacos.api.ai.model.mcp.McpResourceSpecification;
@@ -38,16 +43,26 @@ import com.alibaba.nacos.api.ai.model.mcp.McpServerBasicInfo;
 import com.alibaba.nacos.api.ai.model.mcp.McpServerDetailInfo;
 import com.alibaba.nacos.api.ai.model.mcp.McpToolSpecification;
 import com.alibaba.nacos.api.ai.model.prompt.Prompt;
+import com.alibaba.nacos.api.ai.model.rad.AgentCatalogEntry;
+import com.alibaba.nacos.api.ai.model.rad.AgentDiscoveryFilter;
+import com.alibaba.nacos.api.ai.model.rad.AgentDiscoveryRequest;
+import com.alibaba.nacos.api.ai.model.rad.AgentDiscoveryResult;
+import com.alibaba.nacos.api.ai.model.rad.AgentEndpointDeregistrationBatch;
+import com.alibaba.nacos.api.ai.model.rad.AgentEndpointRegistrationBatch;
+import com.alibaba.nacos.api.ai.model.rad.AgentReference;
+import com.alibaba.nacos.api.ai.model.rad.AgentSearchRequest;
 import com.alibaba.nacos.api.common.Constants;
-import com.alibaba.nacos.api.config.ConfigService;
 import com.alibaba.nacos.api.exception.NacosException;
 import com.alibaba.nacos.api.exception.api.NacosApiException;
 import com.alibaba.nacos.api.model.v2.ErrorCode;
+import com.alibaba.nacos.api.model.Page;
 import com.alibaba.nacos.api.naming.pojo.Instance;
+import com.alibaba.nacos.client.ai.cache.NacosAgentDiscoveryCacheHolder;
 import com.alibaba.nacos.client.ai.cache.NacosAgentCardCacheHolder;
 import com.alibaba.nacos.client.ai.cache.NacosAgentSpecCacheHolder;
 import com.alibaba.nacos.client.ai.cache.NacosMcpServerCacheHolder;
 import com.alibaba.nacos.client.ai.cache.NacosPromptCacheHolder;
+import com.alibaba.nacos.client.ai.cache.NacosSkillCacheHolder;
 import com.alibaba.nacos.client.ai.event.AgentCardListenerInvoker;
 import com.alibaba.nacos.client.ai.event.AgentSpecChangedEvent;
 import com.alibaba.nacos.client.ai.event.AgentSpecListenerInvoker;
@@ -56,10 +71,12 @@ import com.alibaba.nacos.client.ai.event.McpServerChangedEvent;
 import com.alibaba.nacos.client.ai.event.McpServerListenerInvoker;
 import com.alibaba.nacos.client.ai.event.PromptChangedEvent;
 import com.alibaba.nacos.client.ai.event.PromptListenerInvoker;
+import com.alibaba.nacos.client.ai.event.SkillChangedEvent;
+import com.alibaba.nacos.client.ai.event.SkillListenerInvoker;
 import com.alibaba.nacos.client.ai.remote.AiClientProxy;
 import com.alibaba.nacos.client.ai.remote.AiGrpcClient;
 import com.alibaba.nacos.client.ai.remote.AiHttpClientProxy;
-import com.alibaba.nacos.client.config.NacosConfigService;
+import com.alibaba.nacos.client.ai.utils.AgentModelUtils;
 import com.alibaba.nacos.client.env.NacosClientProperties;
 import com.alibaba.nacos.client.utils.ClientBasicParamUtil;
 import com.alibaba.nacos.client.utils.LogUtils;
@@ -72,6 +89,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Nacos AI client service implementation.
@@ -103,9 +121,15 @@ public class NacosAiService implements AiService {
     
     private final NacosAgentSpecCacheHolder agentSpecCacheHolder;
     
+    private final NacosSkillCacheHolder skillCacheHolder;
+    
+    private final NacosAgentDiscoveryCacheHolder agentDiscoveryCacheHolder;
+    
+    private final AgentEndpointPublicationManager agentEndpointPublicationManager;
+    
     private final AiChangeNotifier aiChangeNotifier;
     
-    private final ConfigService skillConfigService;
+    private final AtomicBoolean shutdown = new AtomicBoolean();
     
     public NacosAiService(Properties properties) throws NacosException {
         NacosClientProperties clientProperties = NacosClientProperties.PROTOTYPE.derive(properties);
@@ -115,18 +139,24 @@ public class NacosAiService implements AiService {
         this.httpProxy = new AiHttpClientProxy(namespaceId, clientProperties);
         String transportMode = clientProperties.getProperty(AiConstants.AI_TRANSPORT_MODE,
             AiConstants.AI_TRANSPORT_MODE_GRPC);
-        if (AiConstants.AI_TRANSPORT_MODE_HTTP.equalsIgnoreCase(transportMode)) {
+        boolean httpTransport =
+            AiConstants.AI_TRANSPORT_MODE_HTTP.equalsIgnoreCase(transportMode);
+        if (httpTransport) {
             LOGGER.info("AI transport mode is HTTP, using AiHttpClientProxy as primary proxy.");
             this.aiClientProxy = this.httpProxy;
         } else {
             this.aiClientProxy = this.grpcClient;
         }
-        this.skillConfigService = new NacosConfigService(properties);
+        this.agentDiscoveryCacheHolder =
+            new NacosAgentDiscoveryCacheHolder(namespaceId, this.aiClientProxy);
+        this.agentEndpointPublicationManager =
+            new AgentEndpointPublicationManager(this.aiClientProxy, httpTransport);
         this.mcpServerCacheHolder = new NacosMcpServerCacheHolder(grpcClient, clientProperties);
         this.agentCardCacheHolder = new NacosAgentCardCacheHolder(grpcClient, clientProperties);
         this.promptCacheHolder = new NacosPromptCacheHolder(this.aiClientProxy, clientProperties);
         this.agentSpecCacheHolder =
-            new NacosAgentSpecCacheHolder(this.skillConfigService, this.namespaceId);
+            new NacosAgentSpecCacheHolder(this.aiClientProxy, clientProperties);
+        this.skillCacheHolder = new NacosSkillCacheHolder(this.aiClientProxy, clientProperties);
         this.aiChangeNotifier = new AiChangeNotifier();
         start();
     }
@@ -144,7 +174,13 @@ public class NacosAiService implements AiService {
         NotifyCenter.registerToPublisher(McpServerChangedEvent.class, 16384);
         NotifyCenter.registerToPublisher(PromptChangedEvent.class, 16384);
         NotifyCenter.registerToPublisher(AgentSpecChangedEvent.class, 16384);
+        NotifyCenter.registerToPublisher(SkillChangedEvent.class, 16384);
         NotifyCenter.registerSubscriber(this.aiChangeNotifier);
+    }
+    
+    @Override
+    public AgentVersionDetail publishAgent(AgentPublishRequest request) throws NacosException {
+        return aiClientProxy.publishAgent(AgentModelUtils.copyPublishRequest(request));
     }
     
     @Override
@@ -448,6 +484,44 @@ public class NacosAiService implements AiService {
         return httpProxy.downloadSkillZip(skillName, null, label);
     }
     
+    @Override
+    public byte[] subscribeSkill(String skillName, String version, String label,
+        AbstractNacosSkillListener skillListener) throws NacosException {
+        if (StringUtils.isBlank(skillName)) {
+            throw new NacosApiException(NacosException.INVALID_PARAM, ErrorCode.PARAMETER_MISSING,
+                "parameters `skillName` can't be empty or null");
+        }
+        if (null == skillListener) {
+            throw new NacosApiException(NacosException.INVALID_PARAM, ErrorCode.PARAMETER_MISSING,
+                "parameters `skillListener` can't be null");
+        }
+        
+        SkillListenerInvoker listenerInvoker = new SkillListenerInvoker(skillListener);
+        aiChangeNotifier.registerListener(skillName, version, label, listenerInvoker);
+        byte[] zipBytes = skillCacheHolder.subscribeSkill(skillName, version, label);
+        if (null != zipBytes && !listenerInvoker.isInvoked()) {
+            listenerInvoker.invoke(new NacosSkillEvent(skillName, zipBytes, null, null));
+        }
+        return zipBytes;
+    }
+    
+    @Override
+    public void unsubscribeSkill(String skillName, String version, String label,
+        AbstractNacosSkillListener skillListener) throws NacosException {
+        if (StringUtils.isBlank(skillName)) {
+            throw new NacosApiException(NacosException.INVALID_PARAM, ErrorCode.PARAMETER_MISSING,
+                "parameters `skillName` can't be empty or null");
+        }
+        if (null == skillListener) {
+            return;
+        }
+        SkillListenerInvoker listenerInvoker = new SkillListenerInvoker(skillListener);
+        aiChangeNotifier.deregisterListener(skillName, version, label, listenerInvoker);
+        if (!aiChangeNotifier.isSkillSubscribed(skillName, version, label)) {
+            skillCacheHolder.unsubscribeSkill(skillName, version, label);
+        }
+    }
+    
     // ==================== AgentSpec Methods ====================
     
     @Override
@@ -574,12 +648,63 @@ public class NacosAiService implements AiService {
     }
     
     @Override
+    public Page<AgentCatalogEntry> searchAgents(AgentSearchRequest request)
+        throws NacosException {
+        AgentSearchRequest boundRequest =
+            AgentModelUtils.copySearchRequest(request, namespaceId);
+        return aiClientProxy.searchAgents(boundRequest);
+    }
+    
+    @Override
+    public AgentDiscoveryResult discoverAgent(AgentReference reference,
+        AgentDiscoveryFilter filter) throws NacosException {
+        AgentDiscoveryRequest request =
+            AgentModelUtils.copyDiscoveryRequest(reference, filter, namespaceId);
+        return aiClientProxy.discoverAgent(request);
+    }
+    
+    @Override
+    public AgentDiscoveryResult subscribeAgent(AgentReference reference,
+        AgentDiscoveryFilter filter, AbstractNacosAgentDiscoveryListener listener)
+        throws NacosException {
+        return agentDiscoveryCacheHolder.subscribe(reference, filter, listener);
+    }
+    
+    @Override
+    public void unsubscribeAgent(AgentReference reference, AgentDiscoveryFilter filter,
+        AbstractNacosAgentDiscoveryListener listener) throws NacosException {
+        agentDiscoveryCacheHolder.unsubscribe(reference, filter, listener);
+    }
+    
+    @Override
+    public void registerAgentEndpoints(AgentEndpointRegistrationBatch batch)
+        throws NacosException {
+        AgentEndpointRegistrationBatch boundBatch =
+            AgentModelUtils.copyRegistrationBatch(batch, namespaceId);
+        agentEndpointPublicationManager.register(boundBatch);
+    }
+    
+    @Override
+    public void deregisterAgentEndpoints(AgentEndpointDeregistrationBatch batch)
+        throws NacosException {
+        AgentEndpointDeregistrationBatch boundBatch =
+            AgentModelUtils.copyDeregistrationBatch(batch, namespaceId);
+        agentEndpointPublicationManager.deregister(boundBatch);
+    }
+    
+    @Override
     public void shutdown() throws NacosException {
-        this.grpcClient.shutdown();
-        this.httpProxy.shutdown();
-        this.skillConfigService.shutDown();
+        if (!shutdown.compareAndSet(false, true)) {
+            return;
+        }
+        this.agentDiscoveryCacheHolder.shutdown();
+        this.agentEndpointPublicationManager.shutdown();
         this.mcpServerCacheHolder.shutdown();
+        this.agentCardCacheHolder.shutdown();
         this.promptCacheHolder.shutdown();
         this.agentSpecCacheHolder.shutdown();
+        this.skillCacheHolder.shutdown();
+        this.grpcClient.shutdown();
+        this.httpProxy.shutdown();
     }
 }

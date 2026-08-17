@@ -43,6 +43,10 @@ AgentSpec upload 接收 ZIP 包。解析器必须先校验 manifest 和资源引
 AgentSpec 使用标准 `ai_resource` 和 `ai_resource_version` 模型。它通过 AI 存储保存
 `manifest.json` 和资源文件。
 
+每个版本描述都持久化选定的存储 provider。读取、draft 覆盖和删除使用已持久化的
+provider，有效 provider 配置只选择新版本。缺少 provider 的历史描述使用
+`nacos_config`。
+
 不同于 Skill，AgentSpec 不维护独立 manifest index。版本元数据和存储指针是事实来源。
 
 ## 4. 生命周期
@@ -51,7 +55,7 @@ AgentSpec 遵循共享的 [AI 资源生命周期规范](ai-resource-lifecycle-sp
 
 - upload 或 create draft；
 - update draft；
-- submit 通过发布流水线或直接发布；
+- 提交 draft 或 reviewed 版本通过发布流水线或直接发布，提交 reviewing 版本按幂等调用返回；
 - publish、force publish、update labels、update bizTags、update scope、online/offline
   和 delete。
 
@@ -63,6 +67,33 @@ AgentSpec 可以使用简单生成版本或明确目标版本。类型实现必�
 AgentSpec 发生变化时通知客户端。
 
 运行时客户端不应获得 upload、publish、force publish、delete 或宽范围管理列表能力。
+
+### 5.1 客户端监听协议
+
+客户端使用 HTTP 轮询 + 条件查询（基于 MD5 的 ETag）检测内容变更，避免每次轮询都下载
+完整内容。
+
+- **轮询间隔**：通过 `nacosAiAgentSpecCacheUpdateInterval` 配置，默认 10 000 ms。
+- **请求**：`GET /v3/client/ai/agentspecs?namespaceId=&name=&md5=<cached-md5>`。
+- **304 Not Modified**：服务端将请求中的 MD5 与存储的 `contentMd5`（发布时预算）比对。
+  若一致则返回 HTTP 304 + `ETag` header，客户端保持本地缓存不变。
+- **200 OK**：响应携带 `Result<AgentSpec>` JSON 及响应头
+  `X-Nacos-AgentSpec-Md5`、`X-Nacos-AgentSpec-Resolved-Version`。客户端更新本地缓存
+  和 md5Cache，并发布 `AgentSpecChangedEvent`。
+- **存量回填**：对于 contentMd5 字段不存在的旧版本，服务端在首次条件查询时懒计算并存储
+  MD5。
+
+### 5.2 鉴权资源解析
+
+AgentSpec HTTP API 使用复数形式的 `/ai/agentspecs` 路径段。解析鉴权资源时，保留注解中
+声明的 `AI` sign type 和 API type：
+
+- 常规 Admin 和 Console 操作从 `agentSpecName` 解析资源名；
+- `GET .../agentspecs/list` 是 namespace 范围查询，不解析单个资源名，返回数据的资源
+  可见性由 visibility 插件控制；
+- `PUT .../agentspecs/draft` 从 `agentSpecCard.name` 解析实际写入目标，因为
+  `agentSpecName` 可选，而服务实际写入的对象来自 card；
+- `GET /v3/client/ai/agentspecs` 从客户端请求参数 `name` 解析资源名。
 
 ## 6. 演进说明
 

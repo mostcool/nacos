@@ -56,6 +56,26 @@ public class AiConstants {
         public static final String OFFICIAL_TRANSPORT_STREAMABLE = "streamable-http";
     }
     
+    /**
+     * Agent constants.
+     */
+    public static class Agent {
+        
+        public static final String RESOURCE_STATUS_ENABLE = "enable";
+        
+        public static final String RESOURCE_STATUS_DISABLE = "disable";
+        
+        public static final String VERSION_STATUS_DRAFT = "draft";
+        
+        public static final String VERSION_STATUS_REVIEWING = "reviewing";
+        
+        public static final String VERSION_STATUS_REVIEWED = "reviewed";
+        
+        public static final String VERSION_STATUS_ONLINE = "online";
+        
+        public static final String VERSION_STATUS_OFFLINE = "offline";
+    }
+    
     public static final String AI_TRANSPORT_MODE = "nacosAiTransportMode";
     
     public static final String AI_TRANSPORT_MODE_GRPC = "grpc";
@@ -71,6 +91,11 @@ public class AiConstants {
         "nacosAiAgentCardCacheUpdateInterval";
     
     public static final String AI_PROMPT_CACHE_UPDATE_INTERVAL = "nacosAiPromptCacheUpdateInterval";
+    
+    public static final String AI_SKILL_CACHE_UPDATE_INTERVAL = "nacosAiSkillCacheUpdateInterval";
+    
+    public static final String AI_AGENTSPEC_CACHE_UPDATE_INTERVAL =
+        "nacosAiAgentSpecCacheUpdateInterval";
     
     public static final long DEFAULT_AI_CACHE_UPDATE_INTERVAL = 10000L;
     

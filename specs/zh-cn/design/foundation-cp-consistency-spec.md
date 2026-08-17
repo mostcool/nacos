@@ -104,6 +104,36 @@ JRaft 是当前使用的多 group CP 运行时。
 实现中的超时是运维默认值，不是公开 API 保证。除非领域 API 明确声明，领域规范不得把 JRaft
 超时值暴露为用户可见正确性契约。
 
+### JRaft 传输鉴权
+
+JRaft 原生 gRPC 是服务端间 inner transport。新版本 JRaft client 始终通过 gRPC
+`CallCredentials` 携带配置的 Nacos server identity，服务端始终在分发给 JRaft processor 前通过
+`ServerInterceptor` 校验。
+
+滚动升级使用临时两态迁移：
+
+```text
+COMPATIBLE -> ENFORCED
+```
+
+`COMPATIBLE` 状态下，缺失或错误 credential 会被限频记录，但请求继续执行，因为旧 member 无法携带
+credential。每个新 member 发布临时能力 `supportJraftAuth=true`。完整 member 视图中的所有 member
+都上报该能力后，本机自动且不可逆地进入 `ENFORCED`。在 `ENFORCED` 中，缺失或错误 credential
+会在 processor 执行前以 gRPC `UNAUTHENTICATED` 拒绝。
+
+状态迁移是单向的。Member 新增、删除或元数据更新不得使已强制的进程回到兼容状态。运行态必须先锁存
+强制鉴权，再写入 `{nacos.home}/data/jraft-auth-enforced.state`；状态文件写入失败不得延迟强制鉴权，
+后续定时检查必须持续重试。服务端重启发现该文件时必须立即强制鉴权。状态文件不包含 server identity
+或 member 数据，也不是运维回退开关。
+
+能力发现、兼容放行、状态迁移和状态文件处理必须由一个独立兼容组件拥有。该组件从引入时即标记废弃，
+Javadoc 明确在 Nacos 4.0.0 删除，并且不得拥有永久 credential 解析或校验逻辑。Nacos 4.0.0 删除该
+组件后始终强制 JRaft server identity。
+
+进入强制状态后，向不携带 JRaft credential 的旧版本做混合滚动降级不保证无损或可用。旧 client
+不能调用已强制的新 server，leader 所在位置和 group quorum 分布可能导致选主、复制、ReadIndex、
+leader 转发、snapshot 和 CLI 操作失败。
+
 ## 6. 当前 CP 使用方
 
 | Group | 归属 | 用途 |
@@ -113,7 +143,7 @@ JRaft 是当前使用的多 group CP 运行时。
 | `naming_service_metadata` | Naming | 复制 service metadata 和 cluster metadata。 |
 | `naming_instance_metadata` | Naming | 复制运维态 instance metadata。 |
 | `naming_persistent_service` | Naming 运维 | 复制遗留 naming switch/domain 状态。 |
-| `plugin_state` | Core plugin | 复制插件状态变化。 |
+| `plugin_state` | Core plugin | 选择内置 Raft synchronizer 时，复制插件状态和运行时配置变化。 |
 
 新的 CP 使用方必须把 group 加入相关领域规范，并定义该 group 提交的资源语义。
 
@@ -126,6 +156,14 @@ JRaft 是当前使用的多 group CP 运行时。
 - 失败必须向调用方暴露，不能静默重试后仍作为用户可见成功返回；
 - 当调用层可能重复提交时，领域 apply 逻辑必须幂等或受保护；
 - 写入不得在 committed apply 前发布事件。
+
+Core 插件领域把 `plugin_state` 作为内置 Raft synchronizer 的可选运行时资源，而不是
+Spring context 构造的前置条件。standalone 模式以及显式选择自定义
+`PluginStateSynchronizerProvider` 的集群都不注册该 group。processor 不得在 bean
+构造器中初始化 CP 或注册 group。Core 接受本地插件状态和配置后，再异步初始化默认
+Raft synchronizer 和 group。CP 初始化或 group 注册失败时应记录日志并将集群插件写能力
+标记为不可用，但不得导致 Nacos 启动失败。依赖该 group 的调用在其不可用期间必须返回
+明确的服务端错误，不得静默按 standalone 写入或切换到其他 synchronizer。
 
 读规则：
 
@@ -156,6 +194,9 @@ CP 基础能力和[持久化与 Dump 规范](foundation-persistence-dump-spec.md
 - CP metadata 是运维协议状态。它可以通过授权的 ops API 暴露，但不是领域资源身份。
 - 替换 CP 实现时，必须保持本文定义的 `CPProtocol`、`RequestProcessor4CP`、group、snapshot、
   metadata 和错误语义。
+- 只有领域规范已经定义本地读取视图和明确的写入不可用语义时，才允许把可选领域的 group
+  注册失败与服务端启动隔离。该例外不降低内置 Config 存储等关键 CP 领域的 readiness
+  要求。
 
 ## 10. 相关规范
 

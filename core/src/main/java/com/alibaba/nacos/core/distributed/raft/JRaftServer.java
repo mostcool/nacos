@@ -33,6 +33,7 @@ import com.alibaba.nacos.consistency.entity.Response;
 import com.alibaba.nacos.consistency.exception.ConsistencyException;
 import com.alibaba.nacos.core.distributed.raft.exception.DuplicateRaftGroupException;
 import com.alibaba.nacos.core.distributed.raft.exception.JRaftException;
+import com.alibaba.nacos.core.distributed.raft.auth.JRaftAuthUpgradeCoordinator;
 import com.alibaba.nacos.core.distributed.raft.exception.NoLeaderException;
 import com.alibaba.nacos.core.distributed.raft.exception.NoSuchRaftGroupException;
 import com.alibaba.nacos.core.distributed.raft.utils.FailoverClosure;
@@ -60,7 +61,6 @@ import com.alipay.sofa.jraft.option.CliOptions;
 import com.alipay.sofa.jraft.option.NodeOptions;
 import com.alipay.sofa.jraft.option.RaftOptions;
 import com.alipay.sofa.jraft.rpc.InvokeCallback;
-import com.alipay.sofa.jraft.rpc.RpcProcessor;
 import com.alipay.sofa.jraft.rpc.RpcServer;
 import com.alipay.sofa.jraft.rpc.impl.cli.CliClientServiceImpl;
 import com.alipay.sofa.jraft.util.BytesUtil;
@@ -122,8 +122,6 @@ public class JRaftServer {
     
     private Configuration conf;
     
-    private RpcProcessor userProcessor;
-    
     private NodeOptions nodeOptions;
     
     private Serializer serializer;
@@ -143,7 +141,10 @@ public class JRaftServer {
     
     private int rpcRequestTimeoutMs;
     
-    public JRaftServer() {
+    private final JRaftAuthUpgradeCoordinator jRaftAuthUpgradeCoordinator;
+    
+    public JRaftServer(JRaftAuthUpgradeCoordinator jRaftAuthUpgradeCoordinator) {
+        this.jRaftAuthUpgradeCoordinator = jRaftAuthUpgradeCoordinator;
         this.conf = new Configuration();
     }
     
@@ -206,7 +207,8 @@ public class JRaftServer {
                 }
                 nodeOptions.setInitialConf(conf);
                 
-                rpcServer = JRaftUtils.initRpcServer(this, localPeerId);
+                rpcServer = JRaftUtils.initRpcServer(this, localPeerId,
+                    jRaftAuthUpgradeCoordinator);
                 
                 if (!this.rpcServer.init(null)) {
                     Loggers.RAFT.error("Fail to init [BaseRpcServer].");

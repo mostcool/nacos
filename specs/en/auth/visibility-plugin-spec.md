@@ -25,9 +25,9 @@ caller. It is separate from auth:
 - Visibility decides whether the target resource, or a resource in a range
   query, should be visible to that identity.
 
-Visibility is especially important for AI registry resources, where users may
-create resources that are private to an owner, public to readers, or visible
-through explicit authorization.
+The plugin is domain-neutral. The current Nacos integration applies it to AI
+registry resources, where users may create resources that are private to an
+owner, public to readers, or visible through explicit authorization.
 
 Visibility complements the [Auth And Permission Spec](auth-permission-spec.md)
 and follows the common lifecycle rules in the
@@ -64,17 +64,21 @@ A visibility plugin implements `VisibilityService`.
 | Method | Requirement |
 |--------|-------------|
 | `getVisibilityServiceName()` | Return the stable plugin name. |
-| `init(properties)` | Initialize plugin-specific properties. |
+| `init(properties)` | Deprecated legacy initialization callback for implementations that do not use unified plugin configuration. |
 | `resolveDefaultScopeForCreate(identity, apiType, resourceType)` | Decide the default scope when a resource is created without an explicit scope. |
 | `validateVisibility(identity, action, apiType, resource)` | Validate visibility for one resource. |
 | `adviseQuery(identity, action, apiType, queryContext)` | Return query predicates and explicit resources for range queries. |
 
 The plugin is discovered by SPI and registered with plugin type `visibility`.
-The configured visibility service name is selected by:
+The visibility service name is selected at startup by:
 
 ```properties
 nacos.plugin.visibility.type=nacos
 ```
+
+The selection is restart-effective. It determines the implementation requested
+by the AI domain and the default enabled state in unified plugin management; it
+is not an implementation-owned `ConfigItemDefinition`.
 
 ## Actions
 
@@ -101,38 +105,99 @@ storage layer can apply visibility predicates. `QueryAdvisor` carries:
 The API or storage adapter that lists resources must combine both parts without
 leaking private resources.
 
-The default AI integration converts `QueryAdvisor` to repository `QueryCondition`
-before count and page queries run. The base predicate maps as follows:
+The default domain integration converts `QueryAdvisor` to repository `QueryCondition`
+before count and page queries run. Let `F` be the caller-supplied business filters already
+present on the incoming `QueryCondition` (for example an explicit `scope` or `owner` filter
+from the request), `B` be the resolved `BaseVisibilityPredicate`, and `G` be
+`name IN AuthorizedResources`. The converter must produce:
 
-| Predicate | Query behavior |
+```text
+final query = F AND (B OR G)
+```
+
+`B` is resolved on its own, independently of `G`, into one of: always satisfied, never
+satisfied, or a set of OR branches. The base predicate resolves as follows:
+
+| Predicate | `B` resolution |
 |-----------|----------------|
-| `ALL` | Add no visibility condition. |
-| `PUBLIC` | Restrict to `scope=PUBLIC`, or empty result if the caller requested a conflicting scope. |
-| `OWNER` | Restrict to `owner=identity`, or empty result if identity is absent or conflicts. |
-| `PUBLIC_AND_OWNER` | Restrict to `scope=PUBLIC OR owner=identity`; anonymous callers degrade to public-only. |
+| `ALL` | Always satisfied; adds no visibility condition. |
+| `PUBLIC` | Satisfied when `scope=PUBLIC`; never satisfied when the caller's business filter conflicts with a public scope. |
+| `OWNER` | Satisfied when `owner=identity`; never satisfied when identity is absent, or when the caller's business filter conflicts with the identity as owner. |
+| `PUBLIC_AND_OWNER` | Satisfied when `scope=PUBLIC OR owner=identity`; anonymous callers degrade to the `PUBLIC` resolution. Never satisfied only when the caller's business filter fixes both scope and owner to values that conflict with both branches. |
 
-If `AuthorizedResources` is populated, it is added as an OR branch with the base
-predicate. The default implementation currently leaves this list empty and keeps
-the field as the extension point for explicit resource grants.
+Only after `B` is resolved is it unioned with `G`: an always-satisfied `B` makes `G`
+irrelevant (`B OR G` is still always satisfied), a never-satisfied `B` collapses `B OR G`
+down to `G` alone, and OR-branch resolutions add `G` as one more OR branch alongside them.
+This union must happen before any simplification into a concrete `QueryCondition` shape (a
+hard field, an OR group, or `alwaysEmpty`): resolving `B` into the condition first, before
+`G` is known, can silently turn a union into an intersection, or mark the whole query
+`alwaysEmpty` even though `F AND G` could still match.
+
+Caller-supplied business filters such as owner and scope must be present in the base
+`QueryCondition` before `QueryAdvisor` is applied: they are used both to compute `F` and to
+prune branches of `B` that are already satisfied or already impossible, before the converter
+decides whether to emit an OR group or fall back to `alwaysEmpty`. Resource-type
+implementations must not reset those fields after conversion and overwrite plugin visibility
+constraints.
+
+If `AuthorizedResources` is populated, `G` is added as an OR branch alongside `B` (or in
+place of `B` when `B` alone is never satisfied), per the union above -- it is never dropped
+merely because `B` could not independently be satisfied. The default visibility
+implementation populates this list from plugin-owned explicit grants stored by the selected
+auth plugin. Stored write grants imply read visibility, while read grants only affect
+read/list queries.
 
 ## Plugin State And Configuration
 
-Visibility plugin enablement is controlled by the visibility plugin manager and
-the core plugin state checker. The global visibility plugin switch is:
+Runtime availability requires both the family-wide switch and unified plugin
+state for `visibility:{serviceName}`. The family-wide switch is:
 
 ```properties
 nacos.plugin.visibility.enabled=true
 ```
 
-Plugin-specific properties use the prefix:
+This switch is the outer runtime gate. When it is `false`, no visibility
+implementation may execute, regardless of its unified plugin state. The core
+plugin manager does not convert this switch into implementation state. Startup also defers
+visibility implementation discovery while this switch is false. A server
+configuration refresh that changes it to true triggers one-time discovery, persisted state
+restoration, and unified configuration application before visibility services become available.
+After discovery, changing the switch back to false keeps instances registered while the outer gate
+prevents their execution.
+
+Initial implementation state comes from the compatibility selector
+`nacos.plugin.visibility.type`, then the standard implementation key
+`nacos.plugin.visibility.{serviceName}.enabled`; persisted state takes
+precedence over both, but cannot override the family-wide gate.
+Implementation-level runtime changes use the plugin management API.
+
+`VisibilityService` extends `PluginConfigSpec`. The built-in `visibility:nacos` implementation has
+no private configuration, declares no definitions, and is exposed as `configurable=false`.
+An external implementation may own properties under:
 
 ```properties
-nacos.plugin.visibility.{serviceName}.*
+nacos.plugin.visibility.{serviceName}.{itemKey}
 ```
 
 If visibility is disabled, the owning domain must define whether it behaves as
 fully visible or whether it rejects visibility-sensitive operations. The default
-AI visibility implementation treats disabled auth as allowing visibility.
+visibility implementation treats disabled auth as allowing visibility.
+Legacy implementations compiled against the older SPI, and implementations that declare no
+definitions, receive their service-local properties once through
+`VisibilityService.init(Properties)`.
+
+Use of non-empty legacy properties emits a migration warning without logging
+configuration values. When an implementation reports `isConfigurable()=true`, the visibility
+manager must not invoke the legacy callback; the core plugin
+manager's unified `applyConfig` lifecycle is its only configuration application
+path. Such implementations declare their own definitions and receive unified
+source, metadata, masking, and update semantics.
+
+If the selected plugin is disabled or unavailable, the current AI domain skips
+visibility filtering and single-resource visibility validation; creation falls
+back to `PRIVATE` scope. This preserves the historical disabled behavior and
+must not be confused with auth being enabled or disabled. The built-in plugin
+also treats disabled auth as allowing visibility.
 
 ## Relationship With Auth
 
@@ -149,6 +214,23 @@ resources, while auth remains the source of permission decisions. The
 [default auth plugin implementation](default-auth-plugin-spec.md) provides the
 current built-in visibility implementation.
 
+When a plugin-owned grant-management API needs to verify resource existence or
+owner metadata, the domain may expose a lightweight lookup bridge such as
+`VisibilityResourceLocator` so the auth/visibility plugin can resolve
+`namespaceId`, `resourceType`, `resourceName`, `owner`, and `scope` without
+taking a direct compile-time dependency on domain persistence classes.
+
+The default built-in grant-management API is:
+
+```text
+POST /v3/auth/visibility
+DELETE /v3/auth/visibility
+```
+
+These endpoints are plugin-owned auth APIs and must use `ApiType.ADMIN_API`.
+The default implementation does not expose a management-side grant-list
+endpoint.
+
 ## API Requirements
 
 Any API that returns visibility-aware resources must:
@@ -156,6 +238,8 @@ Any API that returns visibility-aware resources must:
 - Validate single-resource read/write operations with `validateVisibility`.
 - Apply `adviseQuery` to list or search operations before returning data.
 - Preserve owner and scope metadata when resources are created or updated.
+- If the domain exposes explicit grant-management APIs, validate resource
+  existence and management authority before mutating grants.
 - Avoid exposing private resource names through counts, errors, or partial list
   responses.
 - Return not found for denied single-resource reads when the API needs to hide

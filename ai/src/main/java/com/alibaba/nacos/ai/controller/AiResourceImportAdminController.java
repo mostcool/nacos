@@ -16,6 +16,7 @@
 
 package com.alibaba.nacos.ai.controller;
 
+import com.alibaba.nacos.api.annotation.Since;
 import com.alibaba.nacos.ai.constant.Constants;
 import com.alibaba.nacos.ai.form.importer.AiResourceImportExecuteForm;
 import com.alibaba.nacos.ai.form.importer.AiResourceImportSearchForm;
@@ -58,12 +59,13 @@ public class AiResourceImportAdminController {
     }
     
     /**
-     * List configured import sources.
+     * List enabled managed importer plugins as import sources.
      *
      * @param form source list form
      * @return source list
      * @throws NacosException if source configuration is invalid
      */
+    @Since("3.2.2")
     @GetMapping("/sources")
     @Secured(action = ActionTypes.READ, signType = SignType.AI, apiType = ApiType.ADMIN_API)
     public Result<List<AiResourceImportSourceInfo>> listSources(
@@ -79,6 +81,7 @@ public class AiResourceImportAdminController {
      * @return candidate page
      * @throws NacosException if the source cannot be searched
      */
+    @Since("3.2.2")
     @PostMapping("/search")
     @Secured(action = ActionTypes.READ, signType = SignType.AI, apiType = ApiType.ADMIN_API)
     public Result<AiResourceImportSearchResponse> search(AiResourceImportSearchForm form)
@@ -94,6 +97,7 @@ public class AiResourceImportAdminController {
      * @return validation result
      * @throws NacosException if validation cannot start
      */
+    @Since("3.2.2")
     @PostMapping("/validate")
     @Secured(action = ActionTypes.WRITE, signType = SignType.AI, apiType = ApiType.ADMIN_API)
     public Result<AiResourceImportValidateResponse> validate(AiResourceImportValidateForm form)
@@ -109,6 +113,7 @@ public class AiResourceImportAdminController {
      * @return import result
      * @throws NacosException if import cannot start
      */
+    @Since("3.2.2")
     @PostMapping("/execute")
     @Secured(action = ActionTypes.WRITE, signType = SignType.AI, apiType = ApiType.ADMIN_API)
     public Result<AiResourceImportExecuteResponse> execute(AiResourceImportExecuteForm form)
